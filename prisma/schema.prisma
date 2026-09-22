@@ -1,0 +1,203 @@
+// ============================================================================
+// ledger-ops — Schéma de données (jalon 1 : grand livre + transactions)
+//
+// IMPORTANT : ce fichier ne décrit que la STRUCTURE. Les règles d'intégrité
+// financière (équilibre des écritures, immutabilité, machine à états, champs
+// figés) vivent dans la migration SQL, en base. Prisma ne sait pas les
+// exprimer, et elles ne doivent pas dépendre du code applicatif.
+// Voir docs/adr/0003-integrite-en-base.md
+// ============================================================================
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  // NestJS compile en CommonJS par défaut.
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// Nature comptable. Le sens "normal" du solde en découle :
+/// ASSET / EXPENSE -> débiteur ; LIABILITY / EQUITY / REVENUE -> créditeur.
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum EntryDirection {
+  DEBIT
+  CREDIT
+}
+
+enum Provider {
+  ORANGE_MONEY
+  MTN_MOMO
+  WAVE
+  MOOV_MONEY
+}
+
+enum TransactionType {
+  PAYMENT
+  REFUND
+}
+
+enum TransactionStatus {
+  INITIATED
+  PENDING
+  SUCCEEDED
+  FAILED
+  EXPIRED
+  PARTIALLY_REFUNDED
+  REFUNDED
+  DISPUTED
+  REVERSED
+}
+
+enum ActorType {
+  USER
+  SYSTEM
+  PROVIDER
+}
+
+// ---------------------------------------------------------------------------
+// Grand livre (partie double)
+// ---------------------------------------------------------------------------
+
+/// Compte du plan comptable. Ne se supprime jamais ; seuls `name` et
+/// `isActive` sont modifiables (contrôlé par trigger).
+model LedgerAccount {
+  id        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Identifiant fonctionnel stable, ex. "provider:orange_money:clearing"
+  code      String      @unique @db.VarChar(100)
+  name      String      @db.VarChar(200)
+  type      AccountType
+  /// ISO 4217 (ex. XOF). Toutes les lignes du compte sont dans cette devise.
+  currency  String      @db.Char(3)
+  isActive  Boolean     @default(true) @map("is_active")
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  postings LedgerPosting[]
+
+  @@map("ledger_accounts")
+}
+
+/// Écriture comptable. Immuable et scellée : ses lignes doivent être
+/// insérées dans la même transaction SQL que l'écriture elle-même.
+/// Une erreur se corrige par une contre-écriture (`reversesEntryId`).
+model JournalEntry {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  description     String   @db.VarChar(500)
+  transactionId   String?  @map("transaction_id") @db.Uuid
+  /// Écriture annulée par celle-ci. Unique : on ne contre-passe qu'une fois.
+  reversesEntryId String?  @unique @map("reverses_entry_id") @db.Uuid
+  /// Identifiant de la transaction SQL de création (sert au scellement).
+  createdTxId     BigInt   @default(dbgenerated("txid_current()")) @map("created_tx_id")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  transaction   Transaction?    @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  reversesEntry JournalEntry?   @relation("EntryReversal", fields: [reversesEntryId], references: [id], onDelete: Restrict)
+  reversedBy    JournalEntry?   @relation("EntryReversal")
+  postings      LedgerPosting[]
+
+  @@index([transactionId])
+  @@index([createdAt])
+  @@map("journal_entries")
+}
+
+/// Ligne d'écriture. Montant TOUJOURS strictement positif, en unité mineure
+/// (1 XOF = 1). Le sens est porté par `direction`, jamais par le signe.
+model LedgerPosting {
+  id        String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entryId   String         @map("entry_id") @db.Uuid
+  accountId String         @map("account_id") @db.Uuid
+  direction EntryDirection
+  amount    BigInt
+  currency  String         @db.Char(3)
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  entry   JournalEntry  @relation(fields: [entryId], references: [id], onDelete: Restrict)
+  account LedgerAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([entryId])
+  @@index([accountId, createdAt])
+  @@map("ledger_postings")
+}
+
+// ---------------------------------------------------------------------------
+// Transactions de paiement
+// ---------------------------------------------------------------------------
+
+model Transaction {
+  id                  String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Référence interne lisible, ex. "TXN-20260922-8F3K2Q"
+  reference           String            @unique @db.VarChar(40)
+  type                TransactionType
+  status              TransactionStatus @default(INITIATED)
+  provider            Provider
+  /// Référence côté opérateur, connue après acquittement. Figée une fois posée.
+  providerReference   String?           @map("provider_reference") @db.VarChar(100)
+  amount              BigInt
+  currency            String            @db.Char(3)
+  /// Cumul des remboursements RÉUSSIS (paiements uniquement).
+  refundedAmount      BigInt            @default(0) @map("refunded_amount")
+  /// Numéro du payeur au format E.164, ex. +2250700000000
+  customerMsisdn      String            @map("customer_msisdn") @db.VarChar(16)
+  /// Pour un REFUND : le paiement remboursé.
+  parentTransactionId String?           @map("parent_transaction_id") @db.Uuid
+  /// Clé fournie par l'appelant : un même appel rejoué ne crée rien.
+  idempotencyKey      String            @unique @map("idempotency_key") @db.VarChar(100)
+  /// SHA-256 (hex) du corps de requête : détecte une clé réutilisée avec un autre contenu.
+  requestFingerprint  String            @map("request_fingerprint") @db.Char(64)
+  /// Verrouillage optimiste ; incrémenté par trigger à chaque UPDATE.
+  version             Int               @default(1)
+  expiresAt           DateTime?         @map("expires_at") @db.Timestamptz(3)
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime          @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  parent        Transaction?               @relation("Refunds", fields: [parentTransactionId], references: [id], onDelete: Restrict)
+  refunds       Transaction[]              @relation("Refunds")
+  statusHistory TransactionStatusHistory[]
+  entries       JournalEntry[]
+
+  @@unique([provider, providerReference])
+  @@index([status, createdAt])
+  @@index([parentTransactionId])
+  @@index([createdAt])
+  @@map("transactions")
+}
+
+/// Historique des statuts, alimenté UNIQUEMENT par trigger. En ajout seul.
+model TransactionStatusHistory {
+  id            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transactionId String             @map("transaction_id") @db.Uuid
+  fromStatus    TransactionStatus? @map("from_status")
+  toStatus      TransactionStatus  @map("to_status")
+  actorType     ActorType          @map("actor_type")
+  actorId       String?            @map("actor_id") @db.VarChar(100)
+  reason        String?            @db.VarChar(500)
+  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+
+  @@index([transactionId, createdAt])
+  @@map("transaction_status_history")
+}
+
+/// Référentiel des transitions de statut autorisées, lu par le trigger.
+/// Peuplé par migration, en lecture seule.
+model TransactionStatusTransition {
+  fromStatus TransactionStatus @map("from_status")
+  toStatus   TransactionStatus @map("to_status")
+
+  @@id([fromStatus, toStatus])
+  @@map("transaction_status_transitions")
+}

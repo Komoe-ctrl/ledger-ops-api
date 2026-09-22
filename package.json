@@ -1,0 +1,32 @@
+{
+  "name": "ledger-ops-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "API du back-office ledger-ops : grand livre, transactions, rapprochement, audit",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "db:up": "docker compose up -d",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:check-drift": "prisma migrate diff --from-migrations ./prisma/migrations --to-schema ./prisma/schema.prisma --exit-code",
+    "db:test:integrity": "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f test/integrity.sql",
+    "typecheck": "prisma generate && tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "dotenv": "^17.0.0",
+    "prisma": "7.10.0",
+    "typescript": "^5.9.0"
+  },
+  "allowScripts": {
+    "@prisma/engines@7.10.0": true,
+    "prisma@7.10.0": true
+  }
+}
