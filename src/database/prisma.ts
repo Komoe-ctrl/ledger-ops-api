@@ -2,7 +2,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Prisma, PrismaClient } from "../generated/prisma/client";
 
 export * from "../generated/prisma/client";
-export { LedgerErrorCode, extractLedgerErrorCode, isLedgerError } from "./ledger-errors";
+export { LedgerErrorCode, extractLedgerErrorCode, extractLedgerErrorMessage, isLedgerError } from "./ledger-errors";
 
 export function createPrismaClient(connectionString: string): PrismaClient {
   return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });

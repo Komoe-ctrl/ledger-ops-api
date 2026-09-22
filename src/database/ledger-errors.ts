@@ -32,3 +32,23 @@ export function isLedgerError(error: unknown, code?: LedgerErrorCode): boolean {
   const found = extractLedgerErrorCode(error);
   return found !== null && (code === undefined || found === code);
 }
+
+/**
+ * Message Postgres "propre", sans le bruit du wrapper Prisma (le texte de
+ * `client.transaction.update()` invocation..., la stack, etc). Sous le
+ * driver adapter, le message original est dans
+ * `error.meta.driverAdapterError.cause.originalMessage` (voir étape 7 du
+ * jalon 2 — pas documenté, vérifié empiriquement). On retombe sur
+ * `error.message` sinon (ex. appel direct hors driver adapter).
+ */
+export function extractLedgerErrorMessage(error: unknown): string | null {
+  const meta = (error as { meta?: { driverAdapterError?: { cause?: { originalMessage?: string } } } } | undefined)
+    ?.meta;
+  const original = meta?.driverAdapterError?.cause?.originalMessage;
+  const source = original ?? (error instanceof Error ? error.message : String(error));
+  const match = CODE_IN_MESSAGE.exec(source);
+  if (!match) {
+    return null;
+  }
+  return source.slice(match.index + match[0].length).trim();
+}
