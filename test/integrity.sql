@@ -1,5 +1,8 @@
 -- ============================================================================
--- Tests d'intégrité du grand livre — à exécuter sur une base migrée et VIDE.
+-- Tests d'intégrité du grand livre — à exécuter sur une base migrée
+-- (le plan comptable de base vient de la migration seed_chart_of_accounts ;
+-- ce script n'ajoute que le compte de test hors plan, provider:usd:test)
+-- et VIDE de toute transaction.
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f packages/db/tests/integrity.sql
 -- Chaque cas négatif vérifie le SQLSTATE exact (LX0xx), pas juste "une erreur".
 -- Ces tests seront repris en Jest + Testcontainers au jalon suivant.
@@ -29,12 +32,16 @@ $$;
 
 -- ---------------------------------------------------------------------------
 -- Plan comptable minimal (XOF)
+-- Les 3 premiers comptes existent déjà (migration seed_chart_of_accounts) ;
+-- ON CONFLICT les laisse intacts. Seul provider:usd:test est propre à ce
+-- fichier (sert uniquement le cas "écriture multi-devises" plus bas).
 -- ---------------------------------------------------------------------------
 INSERT INTO ledger_accounts (code, name, type, currency) VALUES
   ('provider:orange_money:clearing', 'Créance Orange Money',   'ASSET',     'XOF'),
   ('merchant:demo:payable',          'Dû au marchand démo',    'LIABILITY', 'XOF'),
   ('revenue:fees',                   'Commissions',            'REVENUE',   'XOF'),
-  ('provider:usd:test',              'Compte test USD',        'ASSET',     'USD');
+  ('provider:usd:test',              'Compte test USD',        'ASSET',     'USD')
+ON CONFLICT (code) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
 -- CAS NOMINAL : paiement de 10 000 XOF, commission 150 XOF
