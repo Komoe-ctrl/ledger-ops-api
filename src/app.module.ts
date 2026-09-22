@@ -4,6 +4,7 @@ import { validate } from "./config/env.validation";
 import { DatabaseModule } from "./database/database.module";
 import { HealthModule } from "./health/health.module";
 import { PaymentsModule } from "./payments/payments.module";
+import { TransactionsModule } from "./transactions/transactions.module";
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { PaymentsModule } from "./payments/payments.module";
     DatabaseModule,
     HealthModule,
     PaymentsModule,
+    TransactionsModule,
   ],
   controllers: [],
   providers: [],

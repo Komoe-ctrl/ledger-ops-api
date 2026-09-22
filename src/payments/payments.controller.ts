@@ -11,7 +11,7 @@ import {
 import type { Response } from "express";
 import { CreatePaymentDto } from "./dto/create-payment.dto";
 import { PaymentsService } from "./payments.service";
-import { toPaymentResponse } from "./payments.util";
+import { toTransactionResponse } from "../transactions/transaction.presenter";
 
 const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
 
@@ -40,6 +40,6 @@ export class PaymentsController {
       res.status(200);
     }
 
-    return toPaymentResponse(transaction);
+    return toTransactionResponse(transaction);
   }
 }
