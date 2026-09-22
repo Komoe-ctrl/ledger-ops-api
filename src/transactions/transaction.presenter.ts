@@ -16,6 +16,7 @@ export function toTransactionResponse(transaction: Transaction) {
     currency: transaction.currency,
     customerMsisdn: transaction.customerMsisdn,
     refundedAmount: transaction.refundedAmount.toString(),
+    version: transaction.version,
     createdAt: transaction.createdAt,
     updatedAt: transaction.updatedAt,
   };
