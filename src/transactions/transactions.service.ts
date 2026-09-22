@@ -1,9 +1,10 @@
 import { Inject, Injectable, NotFoundException, PreconditionFailedException } from "@nestjs/common";
 import { PrismaService } from "../database/prisma.service";
-import { Prisma, withActor } from "../database/prisma";
+import { Prisma, TransactionStatus, withActor } from "../database/prisma";
 import { ListTransactionsQueryDto } from "./dto/list-transactions.query.dto";
 import { TransitionStatusDto } from "./dto/transition-status.dto";
 import { decodeCursor, encodeCursor } from "./cursor.util";
+import { bookPaymentSuccess } from "./payment-success-booking";
 
 @Injectable()
 export class TransactionsService {
@@ -88,8 +89,8 @@ export class TransactionsService {
       this.prisma.client,
       { type: "SYSTEM", id: "api:transactions", ...(dto.reason ? { reason: dto.reason } : {}) },
       async (tx) => {
-        const rows = await tx.$queryRaw<{ id: string; version: number }[]>`
-          SELECT "id", "version" FROM "transactions" WHERE "reference" = ${reference} FOR UPDATE
+        const rows = await tx.$queryRaw<{ id: string; version: number; status: TransactionStatus }[]>`
+          SELECT "id", "version", "status" FROM "transactions" WHERE "reference" = ${reference} FOR UPDATE
         `;
         const row = rows[0];
         if (!row) {
@@ -101,10 +102,20 @@ export class TransactionsService {
           );
         }
 
-        return tx.transaction.update({
+        const updated = await tx.transaction.update({
           where: { id: row.id },
           data: { status: dto.status },
         });
+
+        // Écriture comptable uniquement au passage PENDING -> SUCCEEDED :
+        // c'est le seul moment où l'argent bouge réellement. Un futur
+        // DISPUTED -> SUCCEEDED (litige gagné, jalon suivant) ne doit PAS
+        // rebooker les mêmes fonds — voir ADR 0004.
+        if (dto.status === TransactionStatus.SUCCEEDED && row.status === TransactionStatus.PENDING) {
+          await bookPaymentSuccess(tx, updated);
+        }
+
+        return updated;
       },
     );
   }
