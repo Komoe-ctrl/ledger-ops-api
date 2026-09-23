@@ -1,17 +1,18 @@
+import { Body, Controller, Headers, HttpCode, Inject, Param, Post, Res } from "@nestjs/common";
 import {
-  BadRequestException,
-  Body,
-  Controller,
-  Headers,
-  HttpCode,
-  Inject,
-  Post,
-  Res,
-} from "@nestjs/common";
-import { ApiCreatedResponse, ApiHeader, ApiOkResponse, ApiOperation, ApiTags, ApiUnprocessableEntityResponse } from "@nestjs/swagger";
+  ApiCreatedResponse,
+  ApiHeader,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiTags,
+  ApiUnprocessableEntityResponse,
+} from "@nestjs/swagger";
 import type { Response } from "express";
 import { CreatePaymentDto } from "./dto/create-payment.dto";
+import { CreateRefundDto } from "./dto/create-refund.dto";
 import { PaymentsService } from "./payments.service";
+import { requireIdempotencyKey } from "./payments.util";
 import { toTransactionResponse } from "../transactions/transaction.presenter";
 import { TransactionResponseDto } from "../transactions/dto/transaction-response.dto";
 import { ProblemDetailsDto } from "../common/dto/problem-details.dto";
@@ -47,14 +48,43 @@ export class PaymentsController {
     @Headers(IDEMPOTENCY_KEY_HEADER) idempotencyKey: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<TransactionResponseDto> {
-    if (!idempotencyKey || idempotencyKey.length === 0) {
-      throw new BadRequestException("En-tête Idempotency-Key obligatoire");
-    }
-    if (idempotencyKey.length > 100) {
-      throw new BadRequestException("Idempotency-Key trop longue (100 caractères max)");
+    const key = requireIdempotencyKey(idempotencyKey);
+    const { transaction, replayed } = await this.payments.create(dto, key);
+
+    if (replayed) {
+      res.setHeader("Idempotent-Replayed", "true");
+      res.status(200);
     }
 
-    const { transaction, replayed } = await this.payments.create(dto, idempotencyKey);
+    return toTransactionResponse(transaction);
+  }
+
+  @Post(":reference/refunds")
+  @HttpCode(201)
+  @ApiOperation({
+    summary: "Rembourser un paiement (partiel ou total)",
+    description:
+      "Crée une transaction REFUND au statut INITIATED, rattachée au paiement. Idempotent, comme " +
+      "POST /v1/payments. L'écriture comptable (ADR 0005) est posée au passage PENDING -> SUCCEEDED du " +
+      "remboursement, pas à sa création.",
+  })
+  @ApiParam({ name: "reference", example: "TXN-20260922-8F3K2Q", description: "Référence du paiement à rembourser." })
+  @ApiHeader({ name: "Idempotency-Key", required: true })
+  @ApiCreatedResponse({ description: "Remboursement créé.", type: TransactionResponseDto })
+  @ApiOkResponse({
+    description: "Rejeu idempotent.",
+    type: TransactionResponseDto,
+    headers: { "Idempotent-Replayed": { schema: { type: "string", example: "true" } } },
+  })
+  @ApiUnprocessableEntityResponse({ type: ProblemDetailsDto })
+  async createRefund(
+    @Param("reference") reference: string,
+    @Body() dto: CreateRefundDto,
+    @Headers(IDEMPOTENCY_KEY_HEADER) idempotencyKey: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<TransactionResponseDto> {
+    const key = requireIdempotencyKey(idempotencyKey);
+    const { transaction, replayed } = await this.payments.createRefund(reference, dto, key);
 
     if (replayed) {
       res.setHeader("Idempotent-Replayed", "true");

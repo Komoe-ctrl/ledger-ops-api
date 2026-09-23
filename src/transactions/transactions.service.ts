@@ -1,10 +1,11 @@
 import { Inject, Injectable, NotFoundException, PreconditionFailedException } from "@nestjs/common";
 import { PrismaService } from "../database/prisma.service";
-import { Prisma, TransactionStatus, withActor } from "../database/prisma";
+import { Prisma, TransactionStatus, TransactionType, withActor } from "../database/prisma";
 import { ListTransactionsQueryDto } from "./dto/list-transactions.query.dto";
 import { TransitionStatusDto } from "./dto/transition-status.dto";
 import { decodeCursor, encodeCursor } from "./cursor.util";
 import { bookPaymentSuccess } from "./payment-success-booking";
+import { bookRefundSuccess } from "./refund-success-booking";
 
 @Injectable()
 export class TransactionsService {
@@ -89,8 +90,10 @@ export class TransactionsService {
       this.prisma.client,
       { type: "SYSTEM", id: "api:transactions", ...(dto.reason ? { reason: dto.reason } : {}) },
       async (tx) => {
-        const rows = await tx.$queryRaw<{ id: string; version: number; status: TransactionStatus }[]>`
-          SELECT "id", "version", "status" FROM "transactions" WHERE "reference" = ${reference} FOR UPDATE
+        const rows = await tx.$queryRaw<
+          { id: string; version: number; status: TransactionStatus; type: TransactionType }[]
+        >`
+          SELECT "id", "version", "status", "type" FROM "transactions" WHERE "reference" = ${reference} FOR UPDATE
         `;
         const row = rows[0];
         if (!row) {
@@ -108,11 +111,17 @@ export class TransactionsService {
         });
 
         // Écriture comptable uniquement au passage PENDING -> SUCCEEDED :
-        // c'est le seul moment où l'argent bouge réellement. Un futur
-        // DISPUTED -> SUCCEEDED (litige gagné, jalon suivant) ne doit PAS
-        // rebooker les mêmes fonds — voir ADR 0004.
+        // c'est le seul moment où l'argent bouge réellement, que ce soit un
+        // paiement (ADR 0004) ou un remboursement (ADR 0005). Un futur
+        // DISPUTED -> SUCCEEDED (litige gagné) ne doit PAS rebooker les
+        // mêmes fonds — d'où la garde sur le statut de DÉPART (`row.status`,
+        // lu par le SELECT FOR UPDATE avant la mise à jour).
         if (dto.status === TransactionStatus.SUCCEEDED && row.status === TransactionStatus.PENDING) {
-          await bookPaymentSuccess(tx, updated);
+          if (row.type === TransactionType.PAYMENT) {
+            await bookPaymentSuccess(tx, updated);
+          } else {
+            await bookRefundSuccess(tx, updated);
+          }
         }
 
         return updated;
