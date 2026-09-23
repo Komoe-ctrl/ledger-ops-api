@@ -6,6 +6,7 @@ import { TransitionStatusDto } from "./dto/transition-status.dto";
 import { decodeCursor, encodeCursor } from "./cursor.util";
 import { bookPaymentSuccess } from "./payment-success-booking";
 import { bookRefundSuccess } from "./refund-success-booking";
+import { bookDisputeReversal } from "./dispute-reversal-booking";
 
 @Injectable()
 export class TransactionsService {
@@ -105,7 +106,7 @@ export class TransactionsService {
           );
         }
 
-        const updated = await tx.transaction.update({
+        let updated = await tx.transaction.update({
           where: { id: row.id },
           data: { status: dto.status },
         });
@@ -122,6 +123,18 @@ export class TransactionsService {
           } else {
             await bookRefundSuccess(tx, updated);
           }
+        }
+
+        // Litige perdu (ADR 0006) : reprend le reste dû au marchand. Litige
+        // gagné (DISPUTED -> SUCCEEDED / -> PARTIALLY_REFUNDED) ne passe pas
+        // ici : c'est déjà couvert par la garde ci-dessus (row.status doit
+        // être PENDING, jamais DISPUTED, pour la branche SUCCEEDED).
+        if (dto.status === TransactionStatus.REVERSED && row.status === TransactionStatus.DISPUTED) {
+          // bookDisputeReversal met à jour refunded_amount sur CETTE même
+          // ligne : il faut réutiliser son retour, pas l'`updated` d'avant,
+          // sous peine de renvoyer au client un refundedAmount/version périmés
+          // (constaté en testant — la réponse HTTP mentait, la base était juste).
+          updated = await bookDisputeReversal(tx, updated);
         }
 
         return updated;
