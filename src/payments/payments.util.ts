@@ -41,3 +41,15 @@ export function generateTransactionReference(): string {
   const suffix = randomBytes(4).toString("hex").toUpperCase().slice(0, 6);
   return `TXN-${date}-${suffix}`;
 }
+
+/**
+ * Fenêtre d'attente d'une confirmation opérateur (paiement ou remboursement)
+ * avant expiration automatique. 15 min : ordre de grandeur usuel mobile
+ * money (varie de 5 à 30 min selon l'opérateur en réalité — valeur figée
+ * ici faute de source produit, à revoir si besoin).
+ */
+const PENDING_EXPIRY_MINUTES = 15;
+
+export function computeExpiresAt(now: Date = new Date()): Date {
+  return new Date(now.getTime() + PENDING_EXPIRY_MINUTES * 60_000);
+}
