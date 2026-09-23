@@ -141,4 +141,26 @@ export class TransactionsService {
       },
     );
   }
+
+  /**
+   * Balayage périodique (voir ExpirationScheduler). Une seule instruction
+   * SQL, pas de SELECT ... FOR UPDATE préalable : contrairement à
+   * `transition()`, il n'y a ici ni version attendue à comparer ni décision
+   * à prendre entre la lecture et l'écriture — juste un filtre dans le
+   * WHERE. Postgres verrouille chaque ligne concernée pour la durée de son
+   * propre UPDATE, ce qui suffit ; le trigger `fn_transactions_before_update`
+   * s'applique par ligne exactement comme pour une mise à jour unitaire.
+   */
+  async expireOverduePending(): Promise<number> {
+    const result = await withActor(
+      this.prisma.client,
+      { type: "SYSTEM", id: "expiration-job", reason: "Expiration automatique (délai dépassé)" },
+      (tx) =>
+        tx.transaction.updateMany({
+          where: { status: TransactionStatus.PENDING, expiresAt: { lt: new Date() } },
+          data: { status: TransactionStatus.EXPIRED },
+        }),
+    );
+    return result.count;
+  }
 }

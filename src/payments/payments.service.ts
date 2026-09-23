@@ -5,7 +5,7 @@ import { createTransactionIdempotently, IdempotentCreateResult } from "../transa
 import { TransactionsService } from "../transactions/transactions.service";
 import { CreatePaymentDto } from "./dto/create-payment.dto";
 import { CreateRefundDto } from "./dto/create-refund.dto";
-import { fingerprintOf, generateTransactionReference, refundFingerprintOf } from "./payments.util";
+import { computeExpiresAt, fingerprintOf, generateTransactionReference, refundFingerprintOf } from "./payments.util";
 
 @Injectable()
 export class PaymentsService {
@@ -26,6 +26,7 @@ export class PaymentsService {
           amount: BigInt(dto.amount),
           currency: dto.currency,
           customerMsisdn: dto.customerMsisdn,
+          expiresAt: computeExpiresAt(),
           idempotencyKey,
           requestFingerprint: fingerprint,
         },
@@ -57,6 +58,7 @@ export class PaymentsService {
           currency: parent.currency,
           customerMsisdn: parent.customerMsisdn,
           parentTransactionId: parent.id,
+          expiresAt: computeExpiresAt(),
           idempotencyKey,
           requestFingerprint: fingerprint,
         },
