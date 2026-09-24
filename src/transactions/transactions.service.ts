@@ -143,24 +143,54 @@ export class TransactionsService {
   }
 
   /**
-   * Balayage périodique (voir ExpirationScheduler). Une seule instruction
-   * SQL, pas de SELECT ... FOR UPDATE préalable : contrairement à
-   * `transition()`, il n'y a ici ni version attendue à comparer ni décision
-   * à prendre entre la lecture et l'écriture — juste un filtre dans le
-   * WHERE. Postgres verrouille chaque ligne concernée pour la durée de son
-   * propre UPDATE, ce qui suffit ; le trigger `fn_transactions_before_update`
-   * s'applique par ligne exactement comme pour une mise à jour unitaire.
+   * Borné en petits paquets, chacun sa propre transaction courte — jamais
+   * un seul UPDATE non borné sur tout ce qui est en retard. Sans ça, un
+   * cron qui n'aurait pas tourné pendant un moment (déploiement gelé, bug)
+   * pourrait se retrouver à verrouiller des dizaines de milliers de lignes
+   * d'un coup, bloquant tout accès concurrent à ces transactions le temps
+   * que ça tourne, et perdant tout le travail si ça échoue à mi-parcours.
+   *
+   * `FOR UPDATE SKIP LOCKED` : si deux exécutions de ce job se chevauchent
+   * (deux instances de l'API, ou un déclenchement manuel qui recoupe le
+   * cron), la seconde ne bloque pas sur les lignes que la première a déjà
+   * prises — elle saute et prend ce qui reste libre. Sûr sous exécution
+   * concurrente sans coordination explicite entre les deux.
    */
+  private static readonly EXPIRATION_BATCH_SIZE = 200;
+
   async expireOverduePending(): Promise<number> {
-    const result = await withActor(
+    let total = 0;
+    let expiredInBatch: number;
+    do {
+      expiredInBatch = await this.expireOneBatch();
+      total += expiredInBatch;
+    } while (expiredInBatch > 0);
+    return total;
+  }
+
+  private async expireOneBatch(): Promise<number> {
+    return withActor(
       this.prisma.client,
       { type: "SYSTEM", id: "expiration-job", reason: "Expiration automatique (délai dépassé)" },
-      (tx) =>
-        tx.transaction.updateMany({
-          where: { status: TransactionStatus.PENDING, expiresAt: { lt: new Date() } },
+      async (tx) => {
+        const rows = await tx.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "transactions"
+          WHERE "status" = 'PENDING' AND "expires_at" < now()
+          ORDER BY "expires_at"
+          LIMIT ${TransactionsService.EXPIRATION_BATCH_SIZE}
+          FOR UPDATE SKIP LOCKED
+        `;
+        if (rows.length === 0) {
+          return 0;
+        }
+
+        await tx.transaction.updateMany({
+          where: { id: { in: rows.map((r) => r.id) } },
           data: { status: TransactionStatus.EXPIRED },
-        }),
+        });
+
+        return rows.length;
+      },
     );
-    return result.count;
   }
 }
