@@ -1,21 +1,32 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { Clock } from "../common/clock";
 import { PrismaService } from "../database/prisma.service";
 import { TransactionType } from "../database/prisma";
 import { createTransactionIdempotently, IdempotentCreateResult } from "../transactions/idempotent-transaction.util";
 import { TransactionsService } from "../transactions/transactions.service";
 import { CreatePaymentDto } from "./dto/create-payment.dto";
 import { CreateRefundDto } from "./dto/create-refund.dto";
-import { computeExpiresAt, fingerprintOf, generateTransactionReference, refundFingerprintOf } from "./payments.util";
+import {
+  computeExpiresAt,
+  fingerprintOf,
+  generateTransactionReference,
+  refundFingerprintOf,
+  resolveExpiryMinutes,
+} from "./payments.util";
 
 @Injectable()
 export class PaymentsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TransactionsService) private readonly transactions: TransactionsService,
+    @Inject(ConfigService) private readonly config: ConfigService,
+    @Inject(Clock) private readonly clock: Clock,
   ) {}
 
   async create(dto: CreatePaymentDto, idempotencyKey: string): Promise<IdempotentCreateResult> {
     const fingerprint = fingerprintOf(dto);
+    const minutes = resolveExpiryMinutes(this.config, dto.provider);
 
     return createTransactionIdempotently(this.prisma, "api:payments", idempotencyKey, fingerprint, (tx) =>
       tx.transaction.create({
@@ -26,7 +37,7 @@ export class PaymentsService {
           amount: BigInt(dto.amount),
           currency: dto.currency,
           customerMsisdn: dto.customerMsisdn,
-          expiresAt: computeExpiresAt(),
+          expiresAt: computeExpiresAt(this.clock.now(), minutes),
           idempotencyKey,
           requestFingerprint: fingerprint,
         },
@@ -47,6 +58,7 @@ export class PaymentsService {
   ): Promise<IdempotentCreateResult> {
     const parent = await this.transactions.findByReferenceOrThrow(parentReference);
     const fingerprint = refundFingerprintOf(parentReference, dto);
+    const minutes = resolveExpiryMinutes(this.config, parent.provider);
 
     return createTransactionIdempotently(this.prisma, "api:payments", idempotencyKey, fingerprint, (tx) =>
       tx.transaction.create({
@@ -58,7 +70,7 @@ export class PaymentsService {
           currency: parent.currency,
           customerMsisdn: parent.customerMsisdn,
           parentTransactionId: parent.id,
-          expiresAt: computeExpiresAt(),
+          expiresAt: computeExpiresAt(this.clock.now(), minutes),
           idempotencyKey,
           requestFingerprint: fingerprint,
         },

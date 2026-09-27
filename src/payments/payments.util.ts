@@ -1,5 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { BadRequestException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { Provider } from "../database/prisma";
 import { CreatePaymentDto } from "./dto/create-payment.dto";
 import { CreateRefundDto } from "./dto/create-refund.dto";
 
@@ -43,13 +45,30 @@ export function generateTransactionReference(): string {
 }
 
 /**
- * Fenêtre d'attente d'une confirmation opérateur (paiement ou remboursement)
- * avant expiration automatique. 15 min : ordre de grandeur usuel mobile
- * money (varie de 5 à 30 min selon l'opérateur en réalité — valeur figée
- * ici faute de source produit, à revoir si besoin).
+ * Défaut faute de configuration explicite. Approximatif : en réalité, un
+ * push USSD expire plutôt entre 2 et 5 min selon l'opérateur — voir
+ * docs/adr/0007-acquittement-tardif.md. Configurable par opérateur
+ * (PAYMENT_EXPIRY_MINUTES_<PROVIDER>) ou globalement
+ * (PAYMENT_EXPIRY_MINUTES_DEFAULT), sinon cette valeur.
  */
-const PENDING_EXPIRY_MINUTES = 15;
+const FALLBACK_EXPIRY_MINUTES = 15;
 
-export function computeExpiresAt(now: Date = new Date()): Date {
-  return new Date(now.getTime() + PENDING_EXPIRY_MINUTES * 60_000);
+const EXPIRY_ENV_KEY_BY_PROVIDER: Record<Provider, string> = {
+  ORANGE_MONEY: "PAYMENT_EXPIRY_MINUTES_ORANGE_MONEY",
+  MTN_MOMO: "PAYMENT_EXPIRY_MINUTES_MTN_MOMO",
+  WAVE: "PAYMENT_EXPIRY_MINUTES_WAVE",
+  MOOV_MONEY: "PAYMENT_EXPIRY_MINUTES_MOOV_MONEY",
+};
+
+export function resolveExpiryMinutes(config: ConfigService, provider: Provider): number {
+  const perProvider = config.get<number>(EXPIRY_ENV_KEY_BY_PROVIDER[provider]);
+  if (perProvider !== undefined) {
+    return perProvider;
+  }
+  return config.get<number>("PAYMENT_EXPIRY_MINUTES_DEFAULT") ?? FALLBACK_EXPIRY_MINUTES;
+}
+
+/** Pur : ne lit ni l'horloge ni la config — reçoit tout ce dont il a besoin. */
+export function computeExpiresAt(now: Date, minutes: number): Date {
+  return new Date(now.getTime() + minutes * 60_000);
 }

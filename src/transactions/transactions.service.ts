@@ -1,4 +1,5 @@
 import { Inject, Injectable, NotFoundException, PreconditionFailedException } from "@nestjs/common";
+import { Clock } from "../common/clock";
 import { PrismaService } from "../database/prisma.service";
 import { Prisma, TransactionStatus, TransactionType, withActor } from "../database/prisma";
 import { ListTransactionsQueryDto } from "./dto/list-transactions.query.dto";
@@ -7,10 +8,14 @@ import { decodeCursor, encodeCursor } from "./cursor.util";
 import { bookPaymentSuccess } from "./payment-success-booking";
 import { bookRefundSuccess } from "./refund-success-booking";
 import { bookDisputeReversal } from "./dispute-reversal-booking";
+import { ReconciliationRequiredException } from "./reconciliation-required.exception";
 
 @Injectable()
 export class TransactionsService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(Clock) private readonly clock: Clock,
+  ) {}
 
   async list(query: ListTransactionsQueryDto) {
     const limit = query.limit ?? 20;
@@ -87,7 +92,12 @@ export class TransactionsService {
    *   uniquement une garantie applicative, pas une garantie base.
    */
   async transition(reference: string, dto: TransitionStatusDto, expectedVersion: number) {
-    return withActor(
+    // Lever ReconciliationRequiredException DEPUIS l'intérieur de withActor
+    // annulerait la transaction SQL entière — y compris la création de
+    // l'exception qu'on veut justement garder. On renvoie donc un résultat
+    // "marqué" depuis la transaction (qui, elle, doit committer normalement),
+    // et on lève l'erreur HTTP APRÈS, une fois le commit fait.
+    const outcome = await withActor(
       this.prisma.client,
       { type: "SYSTEM", id: "api:transactions", ...(dto.reason ? { reason: dto.reason } : {}) },
       async (tx) => {
@@ -104,6 +114,22 @@ export class TransactionsService {
           throw new PreconditionFailedException(
             `If-Match périmé : version attendue ${expectedVersion}, version actuelle ${row.version}`,
           );
+        }
+
+        // Acquittement tardif (ADR 0007) : l'opérateur confirme après notre
+        // délai. EXPIRED reste un cul-de-sac — jamais EXPIRED -> SUCCEEDED,
+        // même ici — mais le désaccord (l'opérateur a de l'argent chez lui
+        // pour cette transaction, nous non) doit être capturé pour qu'un
+        // analyste tranche, pas juste rejeté silencieusement en LX005.
+        if (row.status === TransactionStatus.EXPIRED && dto.status === TransactionStatus.SUCCEEDED) {
+          const exception = await tx.reconciliationException.create({
+            data: {
+              transactionId: row.id,
+              reportedStatus: dto.status,
+              providerReference: dto.providerReference ?? null,
+            },
+          });
+          return { kind: "reconciliation" as const, exceptionId: exception.id };
         }
 
         let updated = await tx.transaction.update({
@@ -137,30 +163,70 @@ export class TransactionsService {
           updated = await bookDisputeReversal(tx, updated);
         }
 
-        return updated;
+        return { kind: "updated" as const, transaction: updated };
       },
     );
+
+    if (outcome.kind === "reconciliation") {
+      throw new ReconciliationRequiredException(reference, outcome.exceptionId);
+    }
+    return outcome.transaction;
   }
 
   /**
-   * Balayage périodique (voir ExpirationScheduler). Une seule instruction
-   * SQL, pas de SELECT ... FOR UPDATE préalable : contrairement à
-   * `transition()`, il n'y a ici ni version attendue à comparer ni décision
-   * à prendre entre la lecture et l'écriture — juste un filtre dans le
-   * WHERE. Postgres verrouille chaque ligne concernée pour la durée de son
-   * propre UPDATE, ce qui suffit ; le trigger `fn_transactions_before_update`
-   * s'applique par ligne exactement comme pour une mise à jour unitaire.
+   * Borné en petits paquets, chacun sa propre transaction courte — jamais
+   * un seul UPDATE non borné sur tout ce qui est en retard. Sans ça, un
+   * cron qui n'aurait pas tourné pendant un moment (déploiement gelé, bug)
+   * pourrait se retrouver à verrouiller des dizaines de milliers de lignes
+   * d'un coup, bloquant tout accès concurrent à ces transactions le temps
+   * que ça tourne, et perdant tout le travail si ça échoue à mi-parcours.
+   *
+   * `FOR UPDATE SKIP LOCKED` : si deux exécutions de ce job se chevauchent
+   * (deux instances de l'API, ou un déclenchement manuel qui recoupe le
+   * cron), la seconde ne bloque pas sur les lignes que la première a déjà
+   * prises — elle saute et prend ce qui reste libre. Sûr sous exécution
+   * concurrente sans coordination explicite entre les deux.
    */
+  private static readonly EXPIRATION_BATCH_SIZE = 200;
+
   async expireOverduePending(): Promise<number> {
-    const result = await withActor(
+    let total = 0;
+    let expiredInBatch: number;
+    do {
+      expiredInBatch = await this.expireOneBatch();
+      total += expiredInBatch;
+    } while (expiredInBatch > 0);
+    return total;
+  }
+
+  private async expireOneBatch(): Promise<number> {
+    return withActor(
       this.prisma.client,
       { type: "SYSTEM", id: "expiration-job", reason: "Expiration automatique (délai dépassé)" },
-      (tx) =>
-        tx.transaction.updateMany({
-          where: { status: TransactionStatus.PENDING, expiresAt: { lt: new Date() } },
+      async (tx) => {
+        // this.clock.now(), pas le now() SQL de Postgres : "maintenant" doit
+        // être la même notion partout dans l'app, et substituable en test —
+        // contrairement à created_at (toujours l'heure réelle du serveur,
+        // imposée par fn_transactions_before_insert), rien n'exige que
+        // "l'instant présent du point de vue du balayage" le soit aussi.
+        const rows = await tx.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "transactions"
+          WHERE "status" = 'PENDING' AND "expires_at" < ${this.clock.now()}
+          ORDER BY "expires_at"
+          LIMIT ${TransactionsService.EXPIRATION_BATCH_SIZE}
+          FOR UPDATE SKIP LOCKED
+        `;
+        if (rows.length === 0) {
+          return 0;
+        }
+
+        await tx.transaction.updateMany({
+          where: { id: { in: rows.map((r) => r.id) } },
           data: { status: TransactionStatus.EXPIRED },
-        }),
+        });
+
+        return rows.length;
+      },
     );
-    return result.count;
   }
 }
