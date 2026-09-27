@@ -88,7 +88,7 @@ model Merchant {
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  // Transaction.merchantId arrive à l'étape 2 — pas de relation ici encore.
+  transactions Transaction[]
 
   @@map("merchants")
 }
@@ -174,6 +174,10 @@ model Transaction {
   customerMsisdn      String            @map("customer_msisdn") @db.VarChar(16)
   /// Pour un REFUND : le paiement remboursé.
   parentTransactionId String?           @map("parent_transaction_id") @db.Uuid
+  /// À qui cet argent est dû (ou par qui, pour un remboursement) — un
+  /// REFUND hérite toujours du marchand de son paiement parent, jamais
+  /// choisi indépendamment. Figé une fois posé (comme provider/amount).
+  merchantId           String            @map("merchant_id") @db.Uuid
   /// Clé fournie par l'appelant : un même appel rejoué ne crée rien.
   idempotencyKey      String            @unique @map("idempotency_key") @db.VarChar(100)
   /// SHA-256 (hex) du corps de requête : détecte une clé réutilisée avec un autre contenu.
@@ -186,6 +190,7 @@ model Transaction {
 
   parent                   Transaction?               @relation("Refunds", fields: [parentTransactionId], references: [id], onDelete: Restrict)
   refunds                  Transaction[]              @relation("Refunds")
+  merchant                 Merchant                   @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   statusHistory            TransactionStatusHistory[]
   entries                  JournalEntry[]
   reconciliationExceptions ReconciliationException[]
@@ -194,6 +199,7 @@ model Transaction {
   @@index([status, createdAt])
   @@index([parentTransactionId])
   @@index([createdAt])
+  @@index([merchantId])
   @@map("transactions")
 }
 
