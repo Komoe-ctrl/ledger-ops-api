@@ -1,10 +1,12 @@
 import { plainToInstance } from "class-transformer";
-import { IsInt, IsOptional, IsUrl, Max, Min, validateSync } from "class-validator";
+import { IsIn, IsInt, IsOptional, IsUrl, Max, Min, validateSync } from "class-validator";
 
 /**
  * Contrat des variables d'environnement attendues par l'API.
  * Seul DATABASE_URL est obligatoire : c'est la seule dépendance dure au
- * démarrage (REDIS_URL servira à BullMQ, plus tard).
+ * démarrage. REDIS_URL n'est requis que si PROVIDER_SIMULATOR_ENABLED=true
+ * (voir ConditionalModule dans app.module.ts — sinon Redis n'est jamais
+ * sollicité, donc jamais requis).
  */
 class EnvironmentVariables {
   @IsUrl({ protocols: ["postgresql", "postgres"], require_tld: false, require_protocol: true })
@@ -53,6 +55,22 @@ class EnvironmentVariables {
   @Min(1)
   @Max(1440)
   PAYMENT_EXPIRY_MINUTES_MOOV_MONEY?: number;
+
+  /**
+   * Désactivé par défaut — jamais activé pendant les tests e2e, qui pilotent
+   * les transitions à la main et deviendraient imprévisibles si le
+   * simulateur transitionnait en même temps en arrière-plan.
+   */
+  @IsOptional()
+  @IsIn(["true", "false"])
+  PROVIDER_SIMULATOR_ENABLED?: string;
+
+  /** Probabilité (0-100) qu'un règlement simulé se conclue en FAILED plutôt que SUCCEEDED. */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  PROVIDER_SIMULATOR_FAILURE_RATE?: number;
 }
 
 /**
