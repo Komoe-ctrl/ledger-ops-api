@@ -16,13 +16,23 @@ import { requireIdempotencyKey } from "./payments.util";
 import { toTransactionResponse } from "../transactions/transaction.presenter";
 import { TransactionResponseDto } from "../transactions/dto/transaction-response.dto";
 import { ProblemDetailsDto } from "../common/dto/problem-details.dto";
+import { MerchantsService } from "../merchants/merchants.service";
 
 const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
+
+// TODO(jalon 4, étape 4) : dérivé de la clé API authentifiée. Tant que
+// l'authentification n'existe pas, tout paiement créé via l'API appartient
+// au marchand démo — c'est ce contrôleur qui le décide, pas PaymentsService
+// (qui, lui, exige déjà merchantId explicitement, prêt pour la vraie source).
+const DEMO_MERCHANT_CODE = "demo";
 
 @ApiTags("payments")
 @Controller("v1/payments")
 export class PaymentsController {
-  constructor(@Inject(PaymentsService) private readonly payments: PaymentsService) {}
+  constructor(
+    @Inject(PaymentsService) private readonly payments: PaymentsService,
+    @Inject(MerchantsService) private readonly merchants: MerchantsService,
+  ) {}
 
   @Post()
   @HttpCode(201)
@@ -49,7 +59,8 @@ export class PaymentsController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<TransactionResponseDto> {
     const key = requireIdempotencyKey(idempotencyKey);
-    const { transaction, replayed } = await this.payments.create(dto, key);
+    const merchant = await this.merchants.findByCodeOrThrow(DEMO_MERCHANT_CODE);
+    const { transaction, replayed } = await this.payments.create(dto, key, merchant.id);
 
     if (replayed) {
       res.setHeader("Idempotent-Replayed", "true");

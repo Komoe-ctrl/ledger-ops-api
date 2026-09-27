@@ -1,7 +1,6 @@
 import { UnprocessableEntityException } from "@nestjs/common";
 import { EntryDirection, Prisma, Transaction, TransactionStatus } from "../database/prisma";
-
-const MERCHANT_PAYABLE_CODE = "merchant:demo:payable";
+import { merchantPayableAccountCode } from "../merchants/merchant-account.util";
 
 /**
  * Écrit le remboursement au grand livre (ADR 0005 : écriture indépendante,
@@ -53,8 +52,14 @@ export async function bookRefundSuccess(tx: Prisma.TransactionClient, refund: Tr
   });
 
   const clearingCode = `provider:${refund.provider.toLowerCase()}:clearing`;
+  // refund.merchantId : hérité du parent à la création (PaymentsService),
+  // jamais recalculé ici — un remboursement est toujours dû par le même
+  // marchand que son paiement d'origine.
+  const merchant = await tx.merchant.findUniqueOrThrow({ where: { id: refund.merchantId } });
+  const merchantPayableCode = merchantPayableAccountCode(merchant.code);
+
   const accounts = await tx.ledgerAccount.findMany({
-    where: { code: { in: [clearingCode, MERCHANT_PAYABLE_CODE] } },
+    where: { code: { in: [clearingCode, merchantPayableCode] } },
   });
   const idOf = (code: string): string => {
     const account = accounts.find((a) => a.code === code);
@@ -75,7 +80,7 @@ export async function bookRefundSuccess(tx: Prisma.TransactionClient, refund: Tr
     data: [
       {
         entryId: entry.id,
-        accountId: idOf(MERCHANT_PAYABLE_CODE),
+        accountId: idOf(merchantPayableCode),
         direction: EntryDirection.DEBIT,
         amount: refund.amount,
         currency: refund.currency,

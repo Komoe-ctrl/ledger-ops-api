@@ -1,6 +1,5 @@
 import { EntryDirection, Prisma, Transaction } from "../database/prisma";
-
-const MERCHANT_PAYABLE_CODE = "merchant:demo:payable";
+import { merchantPayableAccountCode } from "../merchants/merchant-account.util";
 
 /**
  * Litige perdu (DISPUTED -> REVERSED, ADR 0006) : reprend tout ce qui
@@ -35,8 +34,11 @@ export async function bookDisputeReversal(
   });
 
   const clearingCode = `provider:${transaction.provider.toLowerCase()}:clearing`;
+  const merchant = await tx.merchant.findUniqueOrThrow({ where: { id: transaction.merchantId } });
+  const merchantPayableCode = merchantPayableAccountCode(merchant.code);
+
   const accounts = await tx.ledgerAccount.findMany({
-    where: { code: { in: [clearingCode, MERCHANT_PAYABLE_CODE] } },
+    where: { code: { in: [clearingCode, merchantPayableCode] } },
   });
   const idOf = (code: string): string => {
     const account = accounts.find((a) => a.code === code);
@@ -57,7 +59,7 @@ export async function bookDisputeReversal(
     data: [
       {
         entryId: entry.id,
-        accountId: idOf(MERCHANT_PAYABLE_CODE),
+        accountId: idOf(merchantPayableCode),
         direction: EntryDirection.DEBIT,
         amount: remaining,
         currency: transaction.currency,

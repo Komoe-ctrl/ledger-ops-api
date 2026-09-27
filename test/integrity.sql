@@ -49,8 +49,9 @@ ON CONFLICT (code) DO NOTHING;
 BEGIN;
 SELECT set_config('app.actor_type', 'SYSTEM', true), set_config('app.actor_id', 'test-suite', true);
 
-INSERT INTO transactions (reference, type, provider, amount, currency, customer_msisdn, idempotency_key, request_fingerprint)
-VALUES ('TXN-TEST-0001', 'PAYMENT', 'ORANGE_MONEY', 10000, 'XOF', '+2250700000001', 'idem-0001', repeat('a', 64));
+INSERT INTO transactions (reference, type, provider, amount, currency, customer_msisdn, merchant_id, idempotency_key, request_fingerprint)
+SELECT 'TXN-TEST-0001', 'PAYMENT', 'ORANGE_MONEY', 10000, 'XOF', '+2250700000001', id, 'idem-0001', repeat('a', 64)
+FROM merchants WHERE code = 'demo';
 
 UPDATE transactions SET status = 'PENDING' WHERE reference = 'TXN-TEST-0001';
 UPDATE transactions SET status = 'SUCCEEDED', provider_reference = 'OM-998877' WHERE reference = 'TXN-TEST-0001';
@@ -140,8 +141,9 @@ SELECT pg_temp.expect_error('transition interdite SUCCEEDED -> PENDING',
   $q$ UPDATE transactions SET status = 'PENDING' WHERE reference = 'TXN-TEST-0001' $q$, 'LX005');
 
 SELECT pg_temp.expect_error('naître ailleurs qu''en INITIATED',
-  $q$ INSERT INTO transactions (reference, type, status, provider, amount, currency, customer_msisdn, idempotency_key, request_fingerprint)
-      VALUES ('TXN-KO', 'PAYMENT', 'SUCCEEDED', 'WAVE', 100, 'XOF', '+2250700000002', 'idem-ko', repeat('b',64)) $q$, 'LX005');
+  $q$ INSERT INTO transactions (reference, type, status, provider, amount, currency, customer_msisdn, merchant_id, idempotency_key, request_fingerprint)
+      SELECT 'TXN-KO', 'PAYMENT', 'SUCCEEDED', 'WAVE', 100, 'XOF', '+2250700000002', id, 'idem-ko', repeat('b',64)
+      FROM merchants WHERE code = 'demo' $q$, 'LX005');
 
 SELECT pg_temp.expect_error('modifier le montant d''une transaction',
   $q$ UPDATE transactions SET amount = 1 WHERE reference = 'TXN-TEST-0001' $q$, 'LX006');
@@ -152,21 +154,26 @@ SELECT pg_temp.expect_error('changer la référence opérateur posée',
 SELECT pg_temp.expect_error('repousser l''echeance d''expiration',
   $q$ UPDATE transactions SET expires_at = now() + interval '1 hour' WHERE reference = 'TXN-TEST-0001' $q$, 'LX006');
 
+SELECT pg_temp.expect_error('changer le marchand d''une transaction',
+  $q$ UPDATE transactions SET merchant_id = gen_random_uuid() WHERE reference = 'TXN-TEST-0001' $q$, 'LX006');
+
 SELECT pg_temp.expect_error('rejouer une clé d''idempotence',
-  $q$ INSERT INTO transactions (reference, type, provider, amount, currency, customer_msisdn, idempotency_key, request_fingerprint)
-      VALUES ('TXN-DUP', 'PAYMENT', 'WAVE', 100, 'XOF', '+2250700000002', 'idem-0001', repeat('c',64)) $q$, '23505');
+  $q$ INSERT INTO transactions (reference, type, provider, amount, currency, customer_msisdn, merchant_id, idempotency_key, request_fingerprint)
+      SELECT 'TXN-DUP', 'PAYMENT', 'WAVE', 100, 'XOF', '+2250700000002', id, 'idem-0001', repeat('c',64)
+      FROM merchants WHERE code = 'demo' $q$, '23505');
 
 SELECT pg_temp.expect_error('rembourser plus que le reste',
-  $q$ INSERT INTO transactions (reference, type, provider, amount, currency, customer_msisdn, parent_transaction_id, idempotency_key, request_fingerprint)
-      SELECT 'RFD-KO', 'REFUND', 'ORANGE_MONEY', 10001, 'XOF', '+2250700000001', id, 'idem-rfd-ko', repeat('d',64)
+  $q$ INSERT INTO transactions (reference, type, provider, amount, currency, customer_msisdn, parent_transaction_id, merchant_id, idempotency_key, request_fingerprint)
+      SELECT 'RFD-KO', 'REFUND', 'ORANGE_MONEY', 10001, 'XOF', '+2250700000001', id, merchant_id, 'idem-rfd-ko', repeat('d',64)
       FROM transactions WHERE reference = 'TXN-TEST-0001' $q$, 'LX010');
 
 SELECT pg_temp.expect_error('statut REFUNDED sans remboursement complet',
   $q$ UPDATE transactions SET status = 'REFUNDED' WHERE reference = 'TXN-TEST-0001' $q$, '23514');
 
 SELECT pg_temp.expect_error('numéro hors format E.164',
-  $q$ INSERT INTO transactions (reference, type, provider, amount, currency, customer_msisdn, idempotency_key, request_fingerprint)
-      VALUES ('TXN-MSISDN', 'PAYMENT', 'WAVE', 100, 'XOF', '0700000002', 'idem-msisdn', repeat('e',64)) $q$, '23514');
+  $q$ INSERT INTO transactions (reference, type, provider, amount, currency, customer_msisdn, merchant_id, idempotency_key, request_fingerprint)
+      SELECT 'TXN-MSISDN', 'PAYMENT', 'WAVE', 100, 'XOF', '0700000002', id, 'idem-msisdn', repeat('e',64)
+      FROM merchants WHERE code = 'demo' $q$, '23514');
 
 SELECT pg_temp.expect_error('contre-écriture non conforme',
   $q$ WITH e AS (
@@ -181,8 +188,9 @@ COMMIT;
 -- Acteur non déclaré (hors de tout set_config)
 BEGIN;
 SELECT pg_temp.expect_error('changement de statut sans acteur',
-  $q$ INSERT INTO transactions (reference, type, provider, amount, currency, customer_msisdn, idempotency_key, request_fingerprint)
-      VALUES ('TXN-NOACTOR', 'PAYMENT', 'WAVE', 100, 'XOF', '+2250700000003', 'idem-noactor', repeat('f',64)) $q$, 'LX007');
+  $q$ INSERT INTO transactions (reference, type, provider, amount, currency, customer_msisdn, merchant_id, idempotency_key, request_fingerprint)
+      SELECT 'TXN-NOACTOR', 'PAYMENT', 'WAVE', 100, 'XOF', '+2250700000003', id, 'idem-noactor', repeat('f',64)
+      FROM merchants WHERE code = 'demo' $q$, 'LX007');
 COMMIT;
 
 -- Scellement : ajouter une paire ÉQUILIBRÉE à une écriture déjà commitée
@@ -206,8 +214,8 @@ SELECT set_config('app.actor_type', 'USER', true), set_config('app.actor_id', 'a
 -- de dépasser le reste remboursable.
 SELECT id FROM transactions WHERE reference = 'TXN-TEST-0001' FOR UPDATE;
 
-INSERT INTO transactions (reference, type, provider, amount, currency, customer_msisdn, parent_transaction_id, idempotency_key, request_fingerprint)
-SELECT 'RFD-TEST-0001', 'REFUND', 'ORANGE_MONEY', 4000, 'XOF', '+2250700000001', id, 'idem-rfd-0001', repeat('9', 64)
+INSERT INTO transactions (reference, type, provider, amount, currency, customer_msisdn, parent_transaction_id, merchant_id, idempotency_key, request_fingerprint)
+SELECT 'RFD-TEST-0001', 'REFUND', 'ORANGE_MONEY', 4000, 'XOF', '+2250700000001', id, merchant_id, 'idem-rfd-0001', repeat('9', 64)
 FROM transactions WHERE reference = 'TXN-TEST-0001';
 
 UPDATE transactions SET status = 'PENDING'   WHERE reference = 'RFD-TEST-0001';

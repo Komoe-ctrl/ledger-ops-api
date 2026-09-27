@@ -29,7 +29,13 @@ export class PaymentsService {
     @Optional() @Inject(OperatorSimulatorProducer) private readonly simulator?: OperatorSimulatorProducer,
   ) {}
 
-  async create(dto: CreatePaymentDto, idempotencyKey: string): Promise<IdempotentCreateResult> {
+  /**
+   * `merchantId` : pour quel marchand ce paiement encaisse — jamais choisi
+   * par l'appelant (le corps de requête n'a pas ce champ). En attendant
+   * l'authentification (étape 4), le contrôleur le résout provisoirement
+   * sur le marchand "demo" ; ce service, lui, n'a plus le droit de deviner.
+   */
+  async create(dto: CreatePaymentDto, idempotencyKey: string, merchantId: string): Promise<IdempotentCreateResult> {
     const fingerprint = fingerprintOf(dto);
     const minutes = resolveExpiryMinutes(this.config, dto.provider);
 
@@ -42,6 +48,7 @@ export class PaymentsService {
           amount: BigInt(dto.amount),
           currency: dto.currency,
           customerMsisdn: dto.customerMsisdn,
+          merchantId,
           expiresAt: computeExpiresAt(this.clock.now(), minutes),
           idempotencyKey,
           requestFingerprint: fingerprint,
@@ -82,6 +89,9 @@ export class PaymentsService {
           currency: parent.currency,
           customerMsisdn: parent.customerMsisdn,
           parentTransactionId: parent.id,
+          // Jamais choisi par l'appelant : un remboursement est dû par le
+          // même marchand que le paiement d'origine, point final.
+          merchantId: parent.merchantId,
           expiresAt: computeExpiresAt(this.clock.now(), minutes),
           idempotencyKey,
           requestFingerprint: fingerprint,

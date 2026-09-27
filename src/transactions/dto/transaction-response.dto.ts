@@ -32,6 +32,9 @@ export class TransactionResponseDto {
   @ApiProperty({ example: "+2250700000000" })
   customerMsisdn!: string;
 
+  @ApiProperty({ description: "Marchand pour compte de qui ce paiement/remboursement existe." })
+  merchantId!: string;
+
   @ApiProperty({ description: "Cumul des remboursements réussis, en chaîne.", example: "0" })
   refundedAmount!: string;
 

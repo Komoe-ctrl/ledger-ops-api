@@ -1,6 +1,6 @@
 import { EntryDirection, Prisma, Transaction } from "../database/prisma";
+import { merchantPayableAccountCode } from "../merchants/merchant-account.util";
 
-const MERCHANT_PAYABLE_CODE = "merchant:demo:payable";
 const FEES_CODE = "revenue:fees";
 
 /** 1,5 %, arrondi au franc inférieur — voir docs/adr/0004-commission-arrondi.md. */
@@ -16,9 +16,11 @@ export function computeCommission(amount: bigint): bigint {
  */
 export async function bookPaymentSuccess(tx: Prisma.TransactionClient, transaction: Transaction): Promise<void> {
   const clearingCode = `provider:${transaction.provider.toLowerCase()}:clearing`;
+  const merchant = await tx.merchant.findUniqueOrThrow({ where: { id: transaction.merchantId } });
+  const merchantPayableCode = merchantPayableAccountCode(merchant.code);
 
   const accounts = await tx.ledgerAccount.findMany({
-    where: { code: { in: [clearingCode, MERCHANT_PAYABLE_CODE, FEES_CODE] } },
+    where: { code: { in: [clearingCode, merchantPayableCode, FEES_CODE] } },
   });
   const idOf = (code: string): string => {
     const account = accounts.find((a) => a.code === code);
@@ -48,7 +50,7 @@ export async function bookPaymentSuccess(tx: Prisma.TransactionClient, transacti
     },
     {
       entryId: entry.id,
-      accountId: idOf(MERCHANT_PAYABLE_CODE),
+      accountId: idOf(merchantPayableCode),
       direction: EntryDirection.CREDIT,
       amount: merchantAmount,
       currency: transaction.currency,
