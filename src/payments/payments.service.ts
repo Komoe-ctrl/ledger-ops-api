@@ -1,8 +1,9 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Clock } from "../common/clock";
 import { PrismaService } from "../database/prisma.service";
 import { TransactionType } from "../database/prisma";
+import { OperatorSimulatorProducer } from "../provider-simulator/provider-simulator.producer";
 import { createTransactionIdempotently, IdempotentCreateResult } from "../transactions/idempotent-transaction.util";
 import { TransactionsService } from "../transactions/transactions.service";
 import { CreatePaymentDto } from "./dto/create-payment.dto";
@@ -22,13 +23,17 @@ export class PaymentsService {
     @Inject(TransactionsService) private readonly transactions: TransactionsService,
     @Inject(ConfigService) private readonly config: ConfigService,
     @Inject(Clock) private readonly clock: Clock,
+    // Undefined quand ProviderSimulatorModule n'est pas chargé (drapeau
+    // désactivé — voir ConditionalModule dans app.module.ts). @Optional()
+    // évite à PaymentsService de dépendre en dur d'un module absent.
+    @Optional() @Inject(OperatorSimulatorProducer) private readonly simulator?: OperatorSimulatorProducer,
   ) {}
 
   async create(dto: CreatePaymentDto, idempotencyKey: string): Promise<IdempotentCreateResult> {
     const fingerprint = fingerprintOf(dto);
     const minutes = resolveExpiryMinutes(this.config, dto.provider);
 
-    return createTransactionIdempotently(this.prisma, "api:payments", idempotencyKey, fingerprint, (tx) =>
+    const result = await createTransactionIdempotently(this.prisma, "api:payments", idempotencyKey, fingerprint, (tx) =>
       tx.transaction.create({
         data: {
           reference: generateTransactionReference(),
@@ -43,6 +48,13 @@ export class PaymentsService {
         },
       }),
     );
+
+    // Rejeu : rien de nouveau n'a été créé, rien à simuler une deuxième fois.
+    if (!result.replayed) {
+      await this.simulator?.scheduleCallbacks(result.transaction.reference);
+    }
+
+    return result;
   }
 
   /**
@@ -60,7 +72,7 @@ export class PaymentsService {
     const fingerprint = refundFingerprintOf(parentReference, dto);
     const minutes = resolveExpiryMinutes(this.config, parent.provider);
 
-    return createTransactionIdempotently(this.prisma, "api:payments", idempotencyKey, fingerprint, (tx) =>
+    const result = await createTransactionIdempotently(this.prisma, "api:payments", idempotencyKey, fingerprint, (tx) =>
       tx.transaction.create({
         data: {
           reference: generateTransactionReference(),
@@ -76,5 +88,11 @@ export class PaymentsService {
         },
       }),
     );
+
+    if (!result.replayed) {
+      await this.simulator?.scheduleCallbacks(result.transaction.reference);
+    }
+
+    return result;
   }
 }

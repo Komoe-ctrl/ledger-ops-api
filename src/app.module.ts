@@ -1,5 +1,5 @@
 import { Module } from "@nestjs/common";
-import { ConfigModule } from "@nestjs/config";
+import { ConditionalModule, ConfigModule } from "@nestjs/config";
 import { ScheduleModule } from "@nestjs/schedule";
 import { validate } from "./config/env.validation";
 import { CommonModule } from "./common/common.module";
@@ -9,6 +9,7 @@ import { PaymentsModule } from "./payments/payments.module";
 import { TransactionsModule } from "./transactions/transactions.module";
 import { ExpirationModule } from "./expiration/expiration.module";
 import { ReconciliationModule } from "./reconciliation/reconciliation.module";
+import { ProviderSimulatorModule } from "./provider-simulator/provider-simulator.module";
 
 @Module({
   imports: [
@@ -24,6 +25,13 @@ import { ReconciliationModule } from "./reconciliation/reconciliation.module";
     TransactionsModule,
     ExpirationModule,
     ReconciliationModule,
+    // Redis n'est requis QUE si ce module est chargé — jamais en test e2e,
+    // qui ne positionne pas ce drapeau et piloterait sinon des transitions
+    // en concurrence imprévisible avec ce que le simulateur ferait.
+    ConditionalModule.registerWhen(
+      ProviderSimulatorModule,
+      (env: NodeJS.ProcessEnv) => env.PROVIDER_SIMULATOR_ENABLED === "true",
+    ),
   ],
   controllers: [],
   providers: [],
