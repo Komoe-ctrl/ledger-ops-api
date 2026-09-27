@@ -5,6 +5,7 @@ import { validate } from "./config/env.validation";
 import { CommonModule } from "./common/common.module";
 import { DatabaseModule } from "./database/database.module";
 import { HealthModule } from "./health/health.module";
+import { MerchantsModule } from "./merchants/merchants.module";
 import { PaymentsModule } from "./payments/payments.module";
 import { TransactionsModule } from "./transactions/transactions.module";
 import { ExpirationModule } from "./expiration/expiration.module";
@@ -21,6 +22,7 @@ import { ProviderSimulatorModule } from "./provider-simulator/provider-simulator
     CommonModule,
     DatabaseModule,
     HealthModule,
+    MerchantsModule,
     PaymentsModule,
     TransactionsModule,
     ExpirationModule,

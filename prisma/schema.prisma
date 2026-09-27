@@ -72,6 +72,27 @@ enum ActorType {
 // Grand livre (partie double)
 // ---------------------------------------------------------------------------
 
+/// Marchand pour compte de qui les paiements sont encaissés. Ne se supprime
+/// jamais ; seuls `name` et `isActive` sont modifiables (contrôlé par
+/// trigger, même philosophie que LedgerAccount). Son compte comptable
+/// (`merchant:<code>:payable`) est une simple convention de nommage — pas
+/// de FK formelle vers LedgerAccount, cohérent avec les comptes de
+/// compensation par opérateur (`provider:<provider>:clearing`), qui suivent
+/// la même logique sans FK vers l'enum Provider.
+model Merchant {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Identifiant fonctionnel stable, ex. "demo". Sert à construire le code
+  /// du compte payable : merchant:demo:payable.
+  code      String   @unique @db.VarChar(50)
+  name      String   @db.VarChar(200)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  // Transaction.merchantId arrive à l'étape 2 — pas de relation ici encore.
+
+  @@map("merchants")
+}
+
 /// Compte du plan comptable. Ne se supprime jamais ; seuls `name` et
 /// `isActive` sont modifiables (contrôlé par trigger).
 model LedgerAccount {
