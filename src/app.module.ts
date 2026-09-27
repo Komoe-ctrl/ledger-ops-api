@@ -8,6 +8,7 @@ import { HealthModule } from "./health/health.module";
 import { PaymentsModule } from "./payments/payments.module";
 import { TransactionsModule } from "./transactions/transactions.module";
 import { ExpirationModule } from "./expiration/expiration.module";
+import { ReconciliationModule } from "./reconciliation/reconciliation.module";
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { ExpirationModule } from "./expiration/expiration.module";
     PaymentsModule,
     TransactionsModule,
     ExpirationModule,
+    ReconciliationModule,
   ],
   controllers: [],
   providers: [],

@@ -237,5 +237,37 @@ BEGIN
   RAISE NOTICE 'OK    contre-écriture miroir acceptée, remboursement partiel cohérent, balance globale = 0';
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- Exceptions de rapprochement (ADR 0007) : ajout seul, champs figés,
+-- résolution posée une seule fois, jamais vide.
+-- ---------------------------------------------------------------------------
+BEGIN;
+INSERT INTO reconciliation_exceptions (transaction_id, reported_status)
+SELECT id, 'SUCCEEDED' FROM transactions WHERE reference = 'TXN-TEST-0001';
+COMMIT;
+
+BEGIN;
+SELECT pg_temp.expect_error('modifier la transaction visee par une exception',
+  $q$ UPDATE reconciliation_exceptions SET transaction_id = (SELECT id FROM transactions WHERE reference = 'RFD-TEST-0001')
+      WHERE transaction_id = (SELECT id FROM transactions WHERE reference = 'TXN-TEST-0001') $q$, 'LX006');
+
+SELECT pg_temp.expect_error('supprimer une exception de rapprochement',
+  $q$ DELETE FROM reconciliation_exceptions $q$, 'LX001');
+COMMIT;
+
+BEGIN;
+UPDATE reconciliation_exceptions
+  SET resolved_at = now(), resolved_by = 'analyst-01', resolution = 'Verifie manuellement.'
+  WHERE transaction_id = (SELECT id FROM transactions WHERE reference = 'TXN-TEST-0001');
+
+SELECT pg_temp.expect_error('resoudre une exception deja resolue',
+  $q$ UPDATE reconciliation_exceptions SET resolution = 'autre justification'
+      WHERE transaction_id = (SELECT id FROM transactions WHERE reference = 'TXN-TEST-0001') $q$, 'LX006');
+COMMIT;
+
+SELECT pg_temp.expect_error('justification vide a la resolution',
+  $q$ INSERT INTO reconciliation_exceptions (transaction_id, reported_status, resolved_at, resolved_by, resolution)
+      SELECT id, 'SUCCEEDED', now(), 'analyst-01', '   ' FROM transactions WHERE reference = 'RFD-TEST-0001' $q$, '23514');
+
 \echo ''
 \echo 'Tous les tests d''intégrité sont passés.'

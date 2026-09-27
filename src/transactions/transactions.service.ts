@@ -8,6 +8,7 @@ import { decodeCursor, encodeCursor } from "./cursor.util";
 import { bookPaymentSuccess } from "./payment-success-booking";
 import { bookRefundSuccess } from "./refund-success-booking";
 import { bookDisputeReversal } from "./dispute-reversal-booking";
+import { ReconciliationRequiredException } from "./reconciliation-required.exception";
 
 @Injectable()
 export class TransactionsService {
@@ -91,7 +92,12 @@ export class TransactionsService {
    *   uniquement une garantie applicative, pas une garantie base.
    */
   async transition(reference: string, dto: TransitionStatusDto, expectedVersion: number) {
-    return withActor(
+    // Lever ReconciliationRequiredException DEPUIS l'intérieur de withActor
+    // annulerait la transaction SQL entière — y compris la création de
+    // l'exception qu'on veut justement garder. On renvoie donc un résultat
+    // "marqué" depuis la transaction (qui, elle, doit committer normalement),
+    // et on lève l'erreur HTTP APRÈS, une fois le commit fait.
+    const outcome = await withActor(
       this.prisma.client,
       { type: "SYSTEM", id: "api:transactions", ...(dto.reason ? { reason: dto.reason } : {}) },
       async (tx) => {
@@ -108,6 +114,22 @@ export class TransactionsService {
           throw new PreconditionFailedException(
             `If-Match périmé : version attendue ${expectedVersion}, version actuelle ${row.version}`,
           );
+        }
+
+        // Acquittement tardif (ADR 0007) : l'opérateur confirme après notre
+        // délai. EXPIRED reste un cul-de-sac — jamais EXPIRED -> SUCCEEDED,
+        // même ici — mais le désaccord (l'opérateur a de l'argent chez lui
+        // pour cette transaction, nous non) doit être capturé pour qu'un
+        // analyste tranche, pas juste rejeté silencieusement en LX005.
+        if (row.status === TransactionStatus.EXPIRED && dto.status === TransactionStatus.SUCCEEDED) {
+          const exception = await tx.reconciliationException.create({
+            data: {
+              transactionId: row.id,
+              reportedStatus: dto.status,
+              providerReference: dto.providerReference ?? null,
+            },
+          });
+          return { kind: "reconciliation" as const, exceptionId: exception.id };
         }
 
         let updated = await tx.transaction.update({
@@ -141,9 +163,14 @@ export class TransactionsService {
           updated = await bookDisputeReversal(tx, updated);
         }
 
-        return updated;
+        return { kind: "updated" as const, transaction: updated };
       },
     );
+
+    if (outcome.kind === "reconciliation") {
+      throw new ReconciliationRequiredException(reference, outcome.exceptionId);
+    }
+    return outcome.transaction;
   }
 
   /**

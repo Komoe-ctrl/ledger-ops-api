@@ -163,10 +163,11 @@ model Transaction {
   createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime          @default(now()) @map("updated_at") @db.Timestamptz(3)
 
-  parent        Transaction?               @relation("Refunds", fields: [parentTransactionId], references: [id], onDelete: Restrict)
-  refunds       Transaction[]              @relation("Refunds")
-  statusHistory TransactionStatusHistory[]
-  entries       JournalEntry[]
+  parent                   Transaction?               @relation("Refunds", fields: [parentTransactionId], references: [id], onDelete: Restrict)
+  refunds                  Transaction[]              @relation("Refunds")
+  statusHistory            TransactionStatusHistory[]
+  entries                  JournalEntry[]
+  reconciliationExceptions ReconciliationException[]
 
   @@unique([provider, providerReference])
   @@index([status, createdAt])
@@ -200,4 +201,28 @@ model TransactionStatusTransition {
 
   @@id([fromStatus, toStatus])
   @@map("transaction_status_transitions")
+}
+
+/// Désaccord entre nous et l'opérateur : capturé quand un acquittement
+/// arrive après qu'on a déjà marqué la transaction EXPIRED. EXPIRED reste
+/// un cul-de-sac (jamais EXPIRED -> SUCCEEDED) — ceci ne rouvre rien, ça
+/// donne juste à un humain de quoi trancher. Voir ADR 0007.
+model ReconciliationException {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transactionId     String            @map("transaction_id") @db.Uuid
+  /// Ce que l'opérateur prétend (typiquement SUCCEEDED).
+  reportedStatus    TransactionStatus @map("reported_status")
+  providerReference String?           @map("provider_reference") @db.VarChar(100)
+  detectedAt        DateTime          @default(now()) @map("detected_at") @db.Timestamptz(3)
+  /// Les trois champs suivants se posent ensemble, une seule fois.
+  resolvedAt        DateTime?         @map("resolved_at") @db.Timestamptz(3)
+  resolvedBy        String?           @map("resolved_by") @db.VarChar(100)
+  /// Justification obligatoire à la résolution — jamais vide une fois posée.
+  resolution        String?           @db.VarChar(2000)
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+
+  @@index([transactionId])
+  @@index([resolvedAt])
+  @@map("reconciliation_exceptions")
 }

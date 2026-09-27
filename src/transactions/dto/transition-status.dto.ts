@@ -13,4 +13,16 @@ export class TransitionStatusDto {
   @IsString()
   @MaxLength(500)
   reason?: string;
+
+  /**
+   * Référence opérateur accompagnant l'acquittement. Utile même quand la
+   * transition échoue (ex. acquittement tardif sur une transaction déjà
+   * EXPIRED — voir ADR 0007) : c'est ce qui va dans l'exception de
+   * rapprochement, pour que l'analyste sache à quoi ça correspond côté opérateur.
+   */
+  @ApiPropertyOptional({ maxLength: 100, example: "OM-998877" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  providerReference?: string;
 }
