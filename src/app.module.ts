@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { ScheduleModule } from "@nestjs/schedule";
 import { validate } from "./config/env.validation";
+import { CommonModule } from "./common/common.module";
 import { DatabaseModule } from "./database/database.module";
 import { HealthModule } from "./health/health.module";
 import { PaymentsModule } from "./payments/payments.module";
@@ -15,6 +16,7 @@ import { ExpirationModule } from "./expiration/expiration.module";
       validate,
     }),
     ScheduleModule.forRoot(),
+    CommonModule,
     DatabaseModule,
     HealthModule,
     PaymentsModule,

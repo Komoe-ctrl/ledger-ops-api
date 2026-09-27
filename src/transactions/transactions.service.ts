@@ -1,4 +1,5 @@
 import { Inject, Injectable, NotFoundException, PreconditionFailedException } from "@nestjs/common";
+import { Clock } from "../common/clock";
 import { PrismaService } from "../database/prisma.service";
 import { Prisma, TransactionStatus, TransactionType, withActor } from "../database/prisma";
 import { ListTransactionsQueryDto } from "./dto/list-transactions.query.dto";
@@ -10,7 +11,10 @@ import { bookDisputeReversal } from "./dispute-reversal-booking";
 
 @Injectable()
 export class TransactionsService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(Clock) private readonly clock: Clock,
+  ) {}
 
   async list(query: ListTransactionsQueryDto) {
     const limit = query.limit ?? 20;
@@ -173,9 +177,14 @@ export class TransactionsService {
       this.prisma.client,
       { type: "SYSTEM", id: "expiration-job", reason: "Expiration automatique (délai dépassé)" },
       async (tx) => {
+        // this.clock.now(), pas le now() SQL de Postgres : "maintenant" doit
+        // être la même notion partout dans l'app, et substituable en test —
+        // contrairement à created_at (toujours l'heure réelle du serveur,
+        // imposée par fn_transactions_before_insert), rien n'exige que
+        // "l'instant présent du point de vue du balayage" le soit aussi.
         const rows = await tx.$queryRaw<{ id: string }[]>`
           SELECT "id" FROM "transactions"
-          WHERE "status" = 'PENDING' AND "expires_at" < now()
+          WHERE "status" = 'PENDING' AND "expires_at" < ${this.clock.now()}
           ORDER BY "expires_at"
           LIMIT ${TransactionsService.EXPIRATION_BATCH_SIZE}
           FOR UPDATE SKIP LOCKED

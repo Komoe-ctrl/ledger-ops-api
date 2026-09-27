@@ -19,6 +19,40 @@ class EnvironmentVariables {
   @Min(1)
   @Max(65535)
   PORT?: number;
+
+  /**
+   * Un push USSD réel expire plutôt entre 2 et 5 min selon l'opérateur ;
+   * voir docs/adr/0007-acquittement-tardif.md.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  PAYMENT_EXPIRY_MINUTES_DEFAULT?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  PAYMENT_EXPIRY_MINUTES_ORANGE_MONEY?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  PAYMENT_EXPIRY_MINUTES_MTN_MOMO?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  PAYMENT_EXPIRY_MINUTES_WAVE?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  PAYMENT_EXPIRY_MINUTES_MOOV_MONEY?: number;
 }
 
 /**

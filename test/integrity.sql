@@ -149,6 +149,9 @@ SELECT pg_temp.expect_error('modifier le montant d''une transaction',
 SELECT pg_temp.expect_error('changer la référence opérateur posée',
   $q$ UPDATE transactions SET provider_reference = 'OM-FAKE' WHERE reference = 'TXN-TEST-0001' $q$, 'LX006');
 
+SELECT pg_temp.expect_error('repousser l''echeance d''expiration',
+  $q$ UPDATE transactions SET expires_at = now() + interval '1 hour' WHERE reference = 'TXN-TEST-0001' $q$, 'LX006');
+
 SELECT pg_temp.expect_error('rejouer une clé d''idempotence',
   $q$ INSERT INTO transactions (reference, type, provider, amount, currency, customer_msisdn, idempotency_key, request_fingerprint)
       VALUES ('TXN-DUP', 'PAYMENT', 'WAVE', 100, 'XOF', '+2250700000002', 'idem-0001', repeat('c',64)) $q$, '23505');
