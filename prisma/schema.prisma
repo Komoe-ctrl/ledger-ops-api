@@ -68,6 +68,15 @@ enum ActorType {
   PROVIDER
 }
 
+/// Rôles applicatifs (jalon 4). MERCHANT est borné à un seul marchand
+/// (ApiKey.merchantId) ; les trois autres sont transverses.
+enum ApiRole {
+  MERCHANT
+  OPERATOR
+  ANALYST
+  ADMIN
+}
+
 // ---------------------------------------------------------------------------
 // Grand livre (partie double)
 // ---------------------------------------------------------------------------
@@ -89,8 +98,34 @@ model Merchant {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   transactions Transaction[]
+  apiKeys      ApiKey[]
 
   @@map("merchants")
+}
+
+/// Clé d'authentification. Ne se supprime jamais ; la révocation
+/// (`isActive`/`revokedAt`) est à sens unique — une fois révoquée, plus
+/// aucun champ ne bouge (contrôlé par trigger). `hashedKey` seul est
+/// stocké : la clé en clair n'existe qu'à la création, jamais récupérable
+/// après (même logique qu'un mot de passe, mais SHA-256 suffit — voir
+/// hash.util.ts : une clé API a une entropie élevée dès le départ,
+/// contrairement à un mot de passe humain, bcrypt n'apporterait rien).
+model ApiKey {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Description humaine, pour les logs/l'administration — jamais utilisé pour l'auth.
+  label     String    @db.VarChar(200)
+  role      ApiRole
+  hashedKey String    @unique @map("hashed_key") @db.VarChar(64)
+  /// Obligatoire pour MERCHANT (borne l'accès à ce marchand) ; NULL sinon.
+  merchantId String?  @map("merchant_id") @db.Uuid
+  isActive  Boolean   @default(true) @map("is_active")
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  merchant Merchant? @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+
+  @@index([merchantId])
+  @@map("api_keys")
 }
 
 /// Compte du plan comptable. Ne se supprime jamais ; seuls `name` et

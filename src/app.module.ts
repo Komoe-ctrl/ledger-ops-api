@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ConditionalModule, ConfigModule } from "@nestjs/config";
 import { ScheduleModule } from "@nestjs/schedule";
 import { validate } from "./config/env.validation";
+import { AuthModule } from "./auth/auth.module";
 import { CommonModule } from "./common/common.module";
 import { DatabaseModule } from "./database/database.module";
 import { HealthModule } from "./health/health.module";
@@ -20,6 +21,7 @@ import { ProviderSimulatorModule } from "./provider-simulator/provider-simulator
     }),
     ScheduleModule.forRoot(),
     CommonModule,
+    AuthModule,
     DatabaseModule,
     HealthModule,
     MerchantsModule,
