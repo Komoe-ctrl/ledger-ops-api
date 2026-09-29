@@ -82,6 +82,15 @@ class EnvironmentVariables {
   @Min(0)
   @Max(100)
   PROVIDER_SIMULATOR_FAILURE_RATE?: number;
+
+  /**
+   * Activé par défaut (voir app.module.ts) : à mettre à "false" seulement
+   * dans un contexte qui pilote expireOverduePending() lui-même (tests e2e,
+   * scripts one-shot) et ne veut pas du vrai cron en concurrence.
+   */
+  @IsOptional()
+  @IsIn(["true", "false"])
+  EXPIRATION_CRON_ENABLED?: string;
 }
 
 /**
