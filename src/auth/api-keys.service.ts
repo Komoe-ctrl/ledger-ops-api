@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../database/prisma.service";
 import { ApiRole } from "../database/prisma";
 import { CreateApiKeyDto } from "./dto/create-api-key.dto";
@@ -47,6 +47,10 @@ export class ApiKeysService {
   }
 
   async revoke(id: string): Promise<void> {
+    const apiKey = await this.prisma.client.apiKey.findUnique({ where: { id } });
+    if (!apiKey) {
+      throw new NotFoundException(`Clé API ${id} introuvable`);
+    }
     await this.prisma.client.apiKey.update({
       where: { id },
       data: { isActive: false, revokedAt: new Date() },

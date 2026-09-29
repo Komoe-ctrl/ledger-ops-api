@@ -17,6 +17,7 @@
     "start:dev": "tsx watch src/main.ts",
     "build": "tsc",
     "start": "node dist/main.js",
+    "bootstrap:admin-key": "tsx scripts/bootstrap-admin-key.ts",
     "test:e2e": "jest --config test/e2e/jest-e2e.config.js"
   },
   "dependencies": {
