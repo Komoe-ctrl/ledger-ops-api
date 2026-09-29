@@ -1,18 +1,25 @@
-import { Body, Controller, Get, Inject, Param, Patch, Query } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, Patch, Query, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiOperation, ApiParam, ApiQuery, ApiTags } from "@nestjs/swagger";
 import { ResolveReconciliationExceptionDto } from "./dto/resolve-reconciliation-exception.dto";
 import { ReconciliationExceptionResponseDto } from "./dto/reconciliation-exception-response.dto";
 import { ReconciliationService } from "./reconciliation.service";
 import { toReconciliationExceptionResponse } from "./reconciliation.presenter";
+import { ApiKeyGuard } from "../auth/api-key.guard";
+import { RolesGuard } from "../auth/roles.guard";
+import { Roles } from "../auth/roles.decorator";
+import { CurrentAuth } from "../auth/current-auth.decorator";
+import { AuthContext } from "../auth/auth-context";
+import { ApiRole } from "../database/prisma";
 
 /**
- * Interne pour l'instant (pas de garde RBAC — jalon 4), comme la
- * transition de statut. Voir ADR 0007 : un acquittement opérateur tardif
- * sur une transaction déjà EXPIRED atterrit ici plutôt que d'essayer une
- * transition EXPIRED -> SUCCEEDED (toujours fermée).
+ * Réservé aux analystes/admins. Voir ADR 0007 : un acquittement opérateur
+ * tardif sur une transaction déjà EXPIRED atterrit ici plutôt que d'essayer
+ * une transition EXPIRED -> SUCCEEDED (toujours fermée).
  */
 @ApiTags("reconciliation")
 @Controller("v1/reconciliation-exceptions")
+@UseGuards(ApiKeyGuard, RolesGuard)
+@Roles(ApiRole.ANALYST, ApiRole.ADMIN)
 export class ReconciliationController {
   constructor(@Inject(ReconciliationService) private readonly reconciliation: ReconciliationService) {}
 
@@ -43,8 +50,9 @@ export class ReconciliationController {
   async resolve(
     @Param("id") id: string,
     @Body() dto: ResolveReconciliationExceptionDto,
+    @CurrentAuth() auth: AuthContext,
   ): Promise<ReconciliationExceptionResponseDto> {
-    const exception = await this.reconciliation.resolve(id, dto);
+    const exception = await this.reconciliation.resolve(id, dto, auth.apiKeyId);
     return toReconciliationExceptionResponse(exception);
   }
 }

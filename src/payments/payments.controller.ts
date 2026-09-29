@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, HttpCode, Inject, Param, Post, Res } from "@nestjs/common";
+import { Body, Controller, Headers, HttpCode, Inject, Param, Post, Res, UseGuards } from "@nestjs/common";
 import {
   ApiCreatedResponse,
   ApiHeader,
@@ -16,23 +16,21 @@ import { requireIdempotencyKey } from "./payments.util";
 import { toTransactionResponse } from "../transactions/transaction.presenter";
 import { TransactionResponseDto } from "../transactions/dto/transaction-response.dto";
 import { ProblemDetailsDto } from "../common/dto/problem-details.dto";
-import { MerchantsService } from "../merchants/merchants.service";
+import { ApiKeyGuard } from "../auth/api-key.guard";
+import { RolesGuard } from "../auth/roles.guard";
+import { Roles } from "../auth/roles.decorator";
+import { CurrentAuth } from "../auth/current-auth.decorator";
+import { AuthContext } from "../auth/auth-context";
+import { ApiRole } from "../database/prisma";
 
 const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
 
-// TODO(jalon 4, étape 4) : dérivé de la clé API authentifiée. Tant que
-// l'authentification n'existe pas, tout paiement créé via l'API appartient
-// au marchand démo — c'est ce contrôleur qui le décide, pas PaymentsService
-// (qui, lui, exige déjà merchantId explicitement, prêt pour la vraie source).
-const DEMO_MERCHANT_CODE = "demo";
-
 @ApiTags("payments")
 @Controller("v1/payments")
+@UseGuards(ApiKeyGuard, RolesGuard)
+@Roles(ApiRole.MERCHANT)
 export class PaymentsController {
-  constructor(
-    @Inject(PaymentsService) private readonly payments: PaymentsService,
-    @Inject(MerchantsService) private readonly merchants: MerchantsService,
-  ) {}
+  constructor(@Inject(PaymentsService) private readonly payments: PaymentsService) {}
 
   @Post()
   @HttpCode(201)
@@ -57,10 +55,10 @@ export class PaymentsController {
     @Body() dto: CreatePaymentDto,
     @Headers(IDEMPOTENCY_KEY_HEADER) idempotencyKey: string | undefined,
     @Res({ passthrough: true }) res: Response,
+    @CurrentAuth() auth: AuthContext,
   ): Promise<TransactionResponseDto> {
     const key = requireIdempotencyKey(idempotencyKey);
-    const merchant = await this.merchants.findByCodeOrThrow(DEMO_MERCHANT_CODE);
-    const { transaction, replayed } = await this.payments.create(dto, key, merchant.id);
+    const { transaction, replayed } = await this.payments.create(dto, key, auth.merchantId!);
 
     if (replayed) {
       res.setHeader("Idempotent-Replayed", "true");
@@ -93,9 +91,10 @@ export class PaymentsController {
     @Body() dto: CreateRefundDto,
     @Headers(IDEMPOTENCY_KEY_HEADER) idempotencyKey: string | undefined,
     @Res({ passthrough: true }) res: Response,
+    @CurrentAuth() auth: AuthContext,
   ): Promise<TransactionResponseDto> {
     const key = requireIdempotencyKey(idempotencyKey);
-    const { transaction, replayed } = await this.payments.createRefund(reference, dto, key);
+    const { transaction, replayed } = await this.payments.createRefund(reference, dto, key, auth.merchantId!);
 
     if (replayed) {
       res.setHeader("Idempotent-Replayed", "true");

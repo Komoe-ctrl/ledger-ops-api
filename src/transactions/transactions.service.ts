@@ -17,11 +17,12 @@ export class TransactionsService {
     @Inject(Clock) private readonly clock: Clock,
   ) {}
 
-  async list(query: ListTransactionsQueryDto) {
+  async list(query: ListTransactionsQueryDto, merchantId?: string) {
     const limit = query.limit ?? 20;
     const cursor = query.cursor ? decodeCursor(query.cursor) : null;
 
     const where: Prisma.TransactionWhereInput = {
+      ...(merchantId ? { merchantId } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.provider ? { provider: query.provider } : {}),
       ...(query.dateFrom || query.dateTo

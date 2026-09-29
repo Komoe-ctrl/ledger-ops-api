@@ -2,7 +2,7 @@ import type { INestApplication } from "@nestjs/common";
 import type { Server } from "node:http";
 import request from "supertest";
 import { PrismaService } from "../../src/database/prisma.service";
-import { createTestApp, uniqueIdempotencyKey } from "./support/test-app";
+import { authHeader, createTestApp, seedTestApiKeys, TestApiKeys, uniqueIdempotencyKey } from "./support/test-app";
 
 const VALID_PAYLOAD = {
   provider: "ORANGE_MONEY",
@@ -15,11 +15,13 @@ describe("Payments & Transactions (e2e)", () => {
   let app: INestApplication;
   let server: Server;
   let prisma: PrismaService;
+  let keys: TestApiKeys;
 
   beforeAll(async () => {
     app = await createTestApp();
     server = app.getHttpServer() as Server;
     prisma = app.get(PrismaService);
+    keys = await seedTestApiKeys(app);
   });
 
   afterAll(async () => {
@@ -31,6 +33,7 @@ describe("Payments & Transactions (e2e)", () => {
 
     const res = await request(server)
       .post("/v1/payments")
+      .set(...authHeader(keys.merchant))
       .set("Idempotency-Key", key)
       .send(VALID_PAYLOAD)
       .expect(201);
@@ -44,17 +47,36 @@ describe("Payments & Transactions (e2e)", () => {
     expect(res.headers["idempotent-replayed"]).toBeUndefined();
   });
 
+  it("sans clé API -> 401", async () => {
+    await request(server)
+      .post("/v1/payments")
+      .set("Idempotency-Key", uniqueIdempotencyKey("no-auth"))
+      .send(VALID_PAYLOAD)
+      .expect(401);
+  });
+
+  it("clé API d'un rôle non-MERCHANT -> 403", async () => {
+    await request(server)
+      .post("/v1/payments")
+      .set(...authHeader(keys.operator))
+      .set("Idempotency-Key", uniqueIdempotencyKey("wrong-role"))
+      .send(VALID_PAYLOAD)
+      .expect(403);
+  });
+
   it("rejeu idempotent : même clé + même corps ne recrée rien", async () => {
     const key = uniqueIdempotencyKey("replay");
 
     const first = await request(server)
       .post("/v1/payments")
+      .set(...authHeader(keys.merchant))
       .set("Idempotency-Key", key)
       .send(VALID_PAYLOAD)
       .expect(201);
 
     const second = await request(server)
       .post("/v1/payments")
+      .set(...authHeader(keys.merchant))
       .set("Idempotency-Key", key)
       .send(VALID_PAYLOAD)
       .expect(200);
@@ -69,10 +91,16 @@ describe("Payments & Transactions (e2e)", () => {
   it("clé réutilisée avec un corps différent -> 422", async () => {
     const key = uniqueIdempotencyKey("mismatch");
 
-    await request(server).post("/v1/payments").set("Idempotency-Key", key).send(VALID_PAYLOAD).expect(201);
+    await request(server)
+      .post("/v1/payments")
+      .set(...authHeader(keys.merchant))
+      .set("Idempotency-Key", key)
+      .send(VALID_PAYLOAD)
+      .expect(201);
 
     const res = await request(server)
       .post("/v1/payments")
+      .set(...authHeader(keys.merchant))
       .set("Idempotency-Key", key)
       .send({ ...VALID_PAYLOAD, amount: "99999" })
       .expect(422);
@@ -87,7 +115,11 @@ describe("Payments & Transactions (e2e)", () => {
 
       const results = await Promise.all(
         Array.from({ length: 10 }, () =>
-          request(server).post("/v1/payments").set("Idempotency-Key", key).send(VALID_PAYLOAD),
+          request(server)
+            .post("/v1/payments")
+            .set(...authHeader(keys.merchant))
+            .set("Idempotency-Key", key)
+            .send(VALID_PAYLOAD),
         ),
       );
 
@@ -108,12 +140,14 @@ describe("Payments & Transactions (e2e)", () => {
     const key = uniqueIdempotencyKey("forbidden-transition");
     const created = await request(server)
       .post("/v1/payments")
+      .set(...authHeader(keys.merchant))
       .set("Idempotency-Key", key)
       .send(VALID_PAYLOAD)
       .expect(201);
 
     const res = await request(server)
       .patch(`/v1/transactions/${created.body.reference}/status`)
+      .set(...authHeader(keys.operator))
       .set("If-Match", String(created.body.version))
       .send({ status: "SUCCEEDED" })
       .expect(409);
@@ -121,10 +155,28 @@ describe("Payments & Transactions (e2e)", () => {
     expect(res.body.code).toBe("LX005");
   });
 
+  it("transition avec une clé MERCHANT -> 403 (réservé à OPERATOR/ADMIN)", async () => {
+    const key = uniqueIdempotencyKey("transition-wrong-role");
+    const created = await request(server)
+      .post("/v1/payments")
+      .set(...authHeader(keys.merchant))
+      .set("Idempotency-Key", key)
+      .send(VALID_PAYLOAD)
+      .expect(201);
+
+    await request(server)
+      .patch(`/v1/transactions/${created.body.reference}/status`)
+      .set(...authHeader(keys.merchant))
+      .set("If-Match", String(created.body.version))
+      .send({ status: "PENDING" })
+      .expect(403);
+  });
+
   it("If-Match périmé -> 412", async () => {
     const key = uniqueIdempotencyKey("stale-etag");
     const created = await request(server)
       .post("/v1/payments")
+      .set(...authHeader(keys.merchant))
       .set("Idempotency-Key", key)
       .send(VALID_PAYLOAD)
       .expect(201);
@@ -132,6 +184,7 @@ describe("Payments & Transactions (e2e)", () => {
     // Consomme la version 1 : la transition réussit, la version passe à 2.
     await request(server)
       .patch(`/v1/transactions/${created.body.reference}/status`)
+      .set(...authHeader(keys.operator))
       .set("If-Match", String(created.body.version))
       .send({ status: "FAILED" })
       .expect(200);
@@ -139,6 +192,7 @@ describe("Payments & Transactions (e2e)", () => {
     // Rejoue le MÊME If-Match : déjà périmé par la transition précédente.
     const stale = await request(server)
       .patch(`/v1/transactions/${created.body.reference}/status`)
+      .set(...authHeader(keys.operator))
       .set("If-Match", String(created.body.version))
       .send({ status: "FAILED" })
       .expect(412);
@@ -150,6 +204,7 @@ describe("Payments & Transactions (e2e)", () => {
     const key = uniqueIdempotencyKey("balanced-ledger");
     const created = await request(server)
       .post("/v1/payments")
+      .set(...authHeader(keys.merchant))
       .set("Idempotency-Key", key)
       .send(VALID_PAYLOAD)
       .expect(201);
@@ -157,12 +212,14 @@ describe("Payments & Transactions (e2e)", () => {
 
     const pending = await request(server)
       .patch(`/v1/transactions/${reference}/status`)
+      .set(...authHeader(keys.operator))
       .set("If-Match", String(created.body.version))
       .send({ status: "PENDING" })
       .expect(200);
 
     await request(server)
       .patch(`/v1/transactions/${reference}/status`)
+      .set(...authHeader(keys.operator))
       .set("If-Match", String(pending.body.version))
       .send({ status: "SUCCEEDED" })
       .expect(200);
