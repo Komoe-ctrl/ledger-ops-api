@@ -15,6 +15,11 @@ import { ApiRole } from "../src/database/prisma";
  * proliférer les clés admin.
  */
 async function main(): Promise<void> {
+  // Script one-shot : le vrai cron d'expiration (toutes les minutes)
+  // n'a rien à faire ici et risquerait de percuter nos propres requêtes
+  // (P2028) — voir app.module.ts.
+  process.env.EXPIRATION_CRON_ENABLED = "false";
+
   const app = await NestFactory.createApplicationContext(AppModule);
   const prisma = app.get(PrismaService);
   const apiKeys = app.get(ApiKeysService);

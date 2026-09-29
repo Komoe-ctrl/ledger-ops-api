@@ -30,6 +30,12 @@ export default async function globalSetup(): Promise<void> {
   appUrl.username = "ledger_app";
   appUrl.password = "ledger_app_dev_only";
 
+  // Le vrai cron d'expiration (ExpirationScheduler, toutes les minutes)
+  // tournerait en concurrence avec les appels directs à
+  // expireOverduePending() dans les specs, avec le même risque de conflit
+  // Prisma (P2028) que dans les scripts one-shot — voir app.module.ts.
+  process.env.EXPIRATION_CRON_ENABLED = "false";
+
   // Hérités par les workers Jest (processus enfants lancés après ce setup).
   process.env.DATABASE_URL = databaseUrl;
   process.env.APP_DATABASE_URL = appUrl.toString();

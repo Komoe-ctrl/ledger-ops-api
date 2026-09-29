@@ -27,8 +27,20 @@ import { ProviderSimulatorModule } from "./provider-simulator/provider-simulator
     MerchantsModule,
     PaymentsModule,
     TransactionsModule,
-    ExpirationModule,
     ReconciliationModule,
+    // Activé par défaut (contrairement au simulateur) : c'est un
+    // comportement de production normal, pas une dépendance optionnelle.
+    // Désactivé explicitement par les tests e2e et les scripts one-shot
+    // (bootstrap-admin-key, seed-demo), qui pilotent expireOverduePending()
+    // eux-mêmes — sans ce drapeau, le vrai cron (toutes les minutes) tourne
+    // en concurrence avec eux et peut faire échouer une transaction Prisma
+    // en cours (P2028, "Unable to start a transaction in the given time") :
+    // vraisemblablement la cause des échecs e2e intermittents jamais
+    // expliqués jusqu'ici.
+    ConditionalModule.registerWhen(
+      ExpirationModule,
+      (env: NodeJS.ProcessEnv) => env.EXPIRATION_CRON_ENABLED !== "false",
+    ),
     // Redis n'est requis QUE si ce module est chargé — jamais en test e2e,
     // qui ne positionne pas ce drapeau et piloterait sinon des transitions
     // en concurrence imprévisible avec ce que le simulateur ferait.
