@@ -3,7 +3,7 @@ import type { Server } from "node:http";
 import request from "supertest";
 import { Clock } from "../../src/common/clock";
 import { TransactionsService } from "../../src/transactions/transactions.service";
-import { ControllableClock, createTestApp, uniqueIdempotencyKey } from "./support/test-app";
+import { authHeader, ControllableClock, createTestApp, seedTestApiKeys, TestApiKeys, uniqueIdempotencyKey } from "./support/test-app";
 
 const VALID_PAYLOAD = {
   provider: "ORANGE_MONEY",
@@ -17,12 +17,14 @@ describe("Expiration automatique (e2e)", () => {
   let server: Server;
   let transactions: TransactionsService;
   let clock: ControllableClock;
+  let keys: TestApiKeys;
 
   beforeAll(async () => {
     app = await createTestApp();
     server = app.getHttpServer() as Server;
     transactions = app.get(TransactionsService);
     clock = app.get(Clock) as ControllableClock;
+    keys = await seedTestApiKeys(app);
   });
 
   afterAll(async () => {
@@ -47,11 +49,13 @@ describe("Expiration automatique (e2e)", () => {
     const overdueKey = uniqueIdempotencyKey("expire-overdue");
     const overdue = await request(server)
       .post("/v1/payments")
+      .set(...authHeader(keys.merchant))
       .set("Idempotency-Key", overdueKey)
       .send(VALID_PAYLOAD)
       .expect(201);
     await request(server)
       .patch(`/v1/transactions/${overdue.body.reference}/status`)
+      .set(...authHeader(keys.operator))
       .set("If-Match", String(overdue.body.version))
       .send({ status: "PENDING" })
       .expect(200);
@@ -64,11 +68,13 @@ describe("Expiration automatique (e2e)", () => {
     const controlKey = uniqueIdempotencyKey("expire-control");
     const control = await request(server)
       .post("/v1/payments")
+      .set(...authHeader(keys.merchant))
       .set("Idempotency-Key", controlKey)
       .send(VALID_PAYLOAD)
       .expect(201);
     await request(server)
       .patch(`/v1/transactions/${control.body.reference}/status`)
+      .set(...authHeader(keys.operator))
       .set("If-Match", String(control.body.version))
       .send({ status: "PENDING" })
       .expect(200);
@@ -76,10 +82,16 @@ describe("Expiration automatique (e2e)", () => {
     const expiredCount = await transactions.expireOverduePending();
     expect(expiredCount).toBeGreaterThanOrEqual(1);
 
-    const overdueAfter = await request(server).get(`/v1/transactions/${overdue.body.reference}`).expect(200);
+    const overdueAfter = await request(server)
+      .get(`/v1/transactions/${overdue.body.reference}`)
+      .set(...authHeader(keys.operator))
+      .expect(200);
     expect(overdueAfter.body.status).toBe("EXPIRED");
 
-    const controlAfter = await request(server).get(`/v1/transactions/${control.body.reference}`).expect(200);
+    const controlAfter = await request(server)
+      .get(`/v1/transactions/${control.body.reference}`)
+      .set(...authHeader(keys.operator))
+      .expect(200);
     expect(controlAfter.body.status).toBe("PENDING");
   });
 });

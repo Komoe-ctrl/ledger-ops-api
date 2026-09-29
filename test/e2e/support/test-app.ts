@@ -3,6 +3,9 @@ import { Test } from "@nestjs/testing";
 import { AppModule } from "../../../src/app.module";
 import { configureApp } from "../../../src/app.config";
 import { Clock } from "../../../src/common/clock";
+import { ApiKeysService } from "../../../src/auth/api-keys.service";
+import { MerchantsService } from "../../../src/merchants/merchants.service";
+import { ApiRole } from "../../../src/database/prisma";
 
 /**
  * Horloge substituable en test : `expires_at` étant figé après création
@@ -46,4 +49,39 @@ export async function createTestApp(): Promise<INestApplication> {
 
 export function uniqueIdempotencyKey(label: string): string {
   return `e2e-${label}-${crypto.randomUUID()}`;
+}
+
+export type TestApiKeys = {
+  merchant: string;
+  operator: string;
+  analyst: string;
+  admin: string;
+};
+
+/**
+ * "demo" existe dans toute base fraîche (seedé par la migration merchants) —
+ * pas besoin de le créer ici, juste de récupérer son id pour la clé MERCHANT.
+ */
+export async function seedTestApiKeys(app: INestApplication): Promise<TestApiKeys> {
+  const apiKeys = app.get(ApiKeysService);
+  const merchants = app.get(MerchantsService);
+  const demo = await merchants.findByCodeOrThrow("demo");
+
+  const [merchant, operator, analyst, admin] = await Promise.all([
+    apiKeys.create({ label: "e2e merchant", role: ApiRole.MERCHANT, merchantId: demo.id }),
+    apiKeys.create({ label: "e2e operator", role: ApiRole.OPERATOR }),
+    apiKeys.create({ label: "e2e analyst", role: ApiRole.ANALYST }),
+    apiKeys.create({ label: "e2e admin", role: ApiRole.ADMIN }),
+  ]);
+
+  return {
+    merchant: merchant.rawKey,
+    operator: operator.rawKey,
+    analyst: analyst.rawKey,
+    admin: admin.rawKey,
+  };
+}
+
+export function authHeader(rawKey: string): [string, string] {
+  return ["Authorization", `Bearer ${rawKey}`];
 }

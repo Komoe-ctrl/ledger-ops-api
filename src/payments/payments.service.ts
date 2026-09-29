@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional } from "@nestjs/common";
+import { Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Clock } from "../common/clock";
 import { PrismaService } from "../database/prisma.service";
@@ -74,8 +74,16 @@ export class PaymentsService {
     parentReference: string,
     dto: CreateRefundDto,
     idempotencyKey: string,
+    merchantId: string,
   ): Promise<IdempotentCreateResult> {
     const parent = await this.transactions.findByReferenceOrThrow(parentReference);
+    // Un marchand ne peut rembourser que ses propres paiements — jamais
+    // dérivé de la clé API pour un autre marchand, même si la référence
+    // existe (sinon un marchand pourrait sonder l'existence de transactions
+    // d'un concurrent en essayant des références au hasard).
+    if (parent.merchantId !== merchantId) {
+      throw new NotFoundException(`Transaction ${parentReference} introuvable`);
+    }
     const fingerprint = refundFingerprintOf(parentReference, dto);
     const minutes = resolveExpiryMinutes(this.config, parent.provider);
 

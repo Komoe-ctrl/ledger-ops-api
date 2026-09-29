@@ -35,7 +35,7 @@ export class ReconciliationService {
    * résolution (LX006) : le contrôle explicite ci-dessous donne un message
    * clair plutôt que de laisser remonter l'erreur base brute.
    */
-  async resolve(id: string, dto: ResolveReconciliationExceptionDto) {
+  async resolve(id: string, dto: ResolveReconciliationExceptionDto, resolvedBy: string) {
     const exception = await this.findByIdOrThrow(id);
     if (exception.resolvedAt) {
       throw new ConflictException(`Exception de rapprochement ${id} déjà résolue`);
@@ -45,7 +45,7 @@ export class ReconciliationService {
       where: { id },
       data: {
         resolvedAt: new Date(),
-        resolvedBy: dto.resolvedBy,
+        resolvedBy,
         resolution: dto.resolution,
       },
       include: INCLUDE_TRANSACTION_REFERENCE,
