@@ -250,8 +250,8 @@ END $$;
 -- résolution posée une seule fois, jamais vide.
 -- ---------------------------------------------------------------------------
 BEGIN;
-INSERT INTO reconciliation_exceptions (transaction_id, reported_status)
-SELECT id, 'SUCCEEDED' FROM transactions WHERE reference = 'TXN-TEST-0001';
+INSERT INTO reconciliation_exceptions (kind, transaction_id, reported_status)
+SELECT 'LATE_ACKNOWLEDGMENT', id, 'SUCCEEDED' FROM transactions WHERE reference = 'TXN-TEST-0001';
 COMMIT;
 
 BEGIN;
@@ -274,8 +274,30 @@ SELECT pg_temp.expect_error('resoudre une exception deja resolue',
 COMMIT;
 
 SELECT pg_temp.expect_error('justification vide a la resolution',
-  $q$ INSERT INTO reconciliation_exceptions (transaction_id, reported_status, resolved_at, resolved_by, resolution)
-      SELECT id, 'SUCCEEDED', now(), 'analyst-01', '   ' FROM transactions WHERE reference = 'RFD-TEST-0001' $q$, '23514');
+  $q$ INSERT INTO reconciliation_exceptions (kind, transaction_id, reported_status, resolved_at, resolved_by, resolution)
+      SELECT 'LATE_ACKNOWLEDGMENT', id, 'SUCCEEDED', now(), 'analyst-01', '   ' FROM transactions WHERE reference = 'RFD-TEST-0001' $q$, '23514');
+
+-- ---------------------------------------------------------------------------
+-- Nouveaux types d'exception (ADR 0008) : cohérence kind / transaction_id / reported_status
+-- ---------------------------------------------------------------------------
+SELECT pg_temp.expect_error('MISSING_LOCALLY avec une transaction locale',
+  $q$ INSERT INTO reconciliation_exceptions (kind, transaction_id, detail)
+      SELECT 'MISSING_LOCALLY', id, 'ne devrait pas passer' FROM transactions WHERE reference = 'TXN-TEST-0001' $q$, '23514');
+
+SELECT pg_temp.expect_error('MISSING_IN_STATEMENT sans transaction locale',
+  $q$ INSERT INTO reconciliation_exceptions (kind, transaction_id, detail)
+      VALUES ('MISSING_IN_STATEMENT', NULL, 'ne devrait pas passer') $q$, '23514');
+
+SELECT pg_temp.expect_error('LATE_ACKNOWLEDGMENT sans reported_status',
+  $q$ INSERT INTO reconciliation_exceptions (kind, transaction_id)
+      SELECT 'LATE_ACKNOWLEDGMENT', id FROM transactions WHERE reference = 'TXN-TEST-0001' $q$, '23514');
+
+SELECT pg_temp.expect_error('AMOUNT_MISMATCH avec un reported_status',
+  $q$ INSERT INTO reconciliation_exceptions (kind, transaction_id, reported_status, detail)
+      SELECT 'AMOUNT_MISMATCH', id, 'SUCCEEDED', 'ne devrait pas passer' FROM transactions WHERE reference = 'TXN-TEST-0001' $q$, '23514');
+
+INSERT INTO reconciliation_exceptions (kind, provider_reference, detail)
+VALUES ('MISSING_LOCALLY', 'OM-TEST-FANTOME', 'relevé sans transaction locale correspondante');
 
 \echo ''
 \echo 'Tous les tests d''intégrité sont passés.'

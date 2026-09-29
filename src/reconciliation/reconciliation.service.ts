@@ -1,8 +1,20 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../database/prisma.service";
+import { ReconciliationExceptionKind } from "../database/prisma";
 import { ResolveReconciliationExceptionDto } from "./dto/resolve-reconciliation-exception.dto";
 
 const INCLUDE_TRANSACTION_REFERENCE = { transaction: { select: { reference: true } } } as const;
+
+/** Tout sauf LATE_ACKNOWLEDGMENT, réservé au chemin automatique de TransactionsService.transition() (ADR 0007). */
+type DiscrepancyKind = Exclude<ReconciliationExceptionKind, "LATE_ACKNOWLEDGMENT">;
+
+export type ReportDiscrepancyInput = {
+  kind: DiscrepancyKind;
+  /** Obligatoire sauf pour MISSING_LOCALLY (par définition, aucune transaction locale ne correspond). */
+  transactionId?: string;
+  providerReference?: string;
+  detail: string;
+};
 
 @Injectable()
 export class ReconciliationService {
@@ -47,6 +59,35 @@ export class ReconciliationService {
         resolvedAt: new Date(),
         resolvedBy,
         resolution: dto.resolution,
+      },
+      include: INCLUDE_TRANSACTION_REFERENCE,
+    });
+  }
+
+  /**
+   * Écart avec un relevé opérateur, hors acquittement tardif (ADR 0008).
+   * Volontairement minimal : pas de modèle "relevé opérateur", pas de moteur
+   * de diff, pas d'import — juste le type d'exception, à appeler quand un
+   * écart est constaté par ailleurs (aujourd'hui : le seed de démo ; demain,
+   * potentiellement un vrai rapprochement — hors périmètre ici).
+   */
+  async reportDiscrepancy(input: ReportDiscrepancyInput) {
+    const isMissingLocally = input.kind === ReconciliationExceptionKind.MISSING_LOCALLY;
+    if (isMissingLocally && input.transactionId) {
+      throw new BadRequestException(
+        "transactionId n'a pas de sens pour MISSING_LOCALLY : par définition, aucune transaction locale ne correspond",
+      );
+    }
+    if (!isMissingLocally && !input.transactionId) {
+      throw new BadRequestException(`transactionId est obligatoire pour ${input.kind}`);
+    }
+
+    return this.prisma.client.reconciliationException.create({
+      data: {
+        kind: input.kind,
+        transactionId: input.transactionId ?? null,
+        providerReference: input.providerReference ?? null,
+        detail: input.detail,
       },
       include: INCLUDE_TRANSACTION_REFERENCE,
     });

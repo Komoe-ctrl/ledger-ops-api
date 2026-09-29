@@ -10,9 +10,11 @@ export function toReconciliationExceptionResponse(
 ): ReconciliationExceptionResponseDto {
   return {
     id: exception.id,
-    transactionReference: exception.transaction.reference,
+    kind: exception.kind,
+    transactionReference: exception.transaction?.reference ?? null,
     reportedStatus: exception.reportedStatus,
     providerReference: exception.providerReference,
+    detail: exception.detail,
     detectedAt: exception.detectedAt,
     resolvedAt: exception.resolvedAt,
     resolvedBy: exception.resolvedBy,
