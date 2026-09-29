@@ -333,7 +333,128 @@ async function seedTransactions(
   return results;
 }
 
+// ---------------------------------------------------------------------------
+// Étape 3 : remboursements (partiel + total) et litige perdu
+// ---------------------------------------------------------------------------
+
+/**
+ * Amène une transaction jusqu'à SUCCEEDED, en reprenant depuis son statut
+ * actuel — jamais en rejouant une transition déjà faite (SUCCEEDED ->
+ * PENDING serait interdite, LX005). Couvre à la fois le premier passage et
+ * une reprise après un rejeu du script.
+ */
+async function driveToSucceeded(transactions: TransactionsService, reference: string): Promise<void> {
+  let current = await transactions.findByReferenceOrThrow(reference);
+  if (current.status === TransactionStatus.INITIATED) {
+    current = await transactions.transition(
+      reference,
+      { status: TransactionStatus.PENDING, reason: "Traitement du remboursement" },
+      current.version,
+    );
+  }
+  if (current.status === TransactionStatus.PENDING) {
+    await transactions.transition(
+      reference,
+      { status: TransactionStatus.SUCCEEDED, reason: "Remboursement confirmé par l'opérateur" },
+      current.version,
+    );
+  }
+}
+
+async function seedRefund(
+  payments: PaymentsService,
+  transactions: TransactionsService,
+  parentReference: string,
+  idempotencyKey: string,
+  reason: string,
+  amountOf: (parentAmount: bigint) => bigint,
+): Promise<string> {
+  const parent = await transactions.findByReferenceOrThrow(parentReference);
+  const refundAmount = amountOf(parent.amount);
+  const { transaction: refund } = await payments.createRefund(
+    parentReference,
+    { amount: String(refundAmount), reason },
+    idempotencyKey,
+    parent.merchantId,
+  );
+  await driveToSucceeded(transactions, refund.reference);
+  return refund.reference;
+}
+
+/**
+ * SUCCEEDED -> DISPUTED -> REVERSED (ADR 0006). État-aware comme
+ * driveToSucceeded : reprend depuis le statut actuel, jamais une double
+ * transition sur un rejeu.
+ */
+async function seedLostDispute(transactions: TransactionsService, reference: string): Promise<void> {
+  let current = await transactions.findByReferenceOrThrow(reference);
+  if (current.status === TransactionStatus.SUCCEEDED) {
+    current = await transactions.transition(
+      reference,
+      { status: TransactionStatus.DISPUTED, reason: "Litige ouvert par le client (produit non reçu)" },
+      current.version,
+    );
+  }
+  if (current.status === TransactionStatus.DISPUTED) {
+    await transactions.transition(
+      reference,
+      { status: TransactionStatus.REVERSED, reason: "Litige perdu — fonds repris par l'opérateur" },
+      current.version,
+    );
+  }
+}
+
+async function seedRefundsAndDispute(
+  payments: PaymentsService,
+  transactions: TransactionsService,
+  seeded: SeededTransaction[],
+): Promise<void> {
+  // Ciblage par POSITION dans `seeded` (scénarios d'index 0, 1, 2 —
+  // toujours dans le groupe SUCCEEDED de buildScenarios(), voir l'ordre des
+  // clés de OUTCOME_COUNTS), jamais par un filtre sur le statut COURANT :
+  // rembourser partialTarget change justement son statut en
+  // PARTIALLY_REFUNDED, donc un filtre "status === SUCCEEDED" réévalué à la
+  // prochaine exécution du script exclurait cette transaction et décalerait
+  // toute la sélection — corps différent pour la même idempotency-key,
+  // 422 constaté en testant un rejeu.
+  const [partialTarget, totalTarget, disputeTarget] = seeded;
+  if (!partialTarget || !totalTarget || !disputeTarget) {
+    throw new Error("Pas assez de transactions pour les remboursements/litige de démo");
+  }
+
+  console.log("--- Remboursements et litige ---");
+
+  const partialRef = await seedRefund(
+    payments,
+    transactions,
+    partialTarget.reference,
+    "seed-demo-refund-partial",
+    "Article manquant dans la commande",
+    (amount) => amount / 2n,
+  );
+  console.log(`  remboursement partiel : ${partialRef} (sur ${partialTarget.reference})`);
+
+  const totalRef = await seedRefund(
+    payments,
+    transactions,
+    totalTarget.reference,
+    "seed-demo-refund-total",
+    "Commande annulée",
+    (amount) => amount,
+  );
+  console.log(`  remboursement total   : ${totalRef} (sur ${totalTarget.reference})`);
+
+  await seedLostDispute(transactions, disputeTarget.reference);
+  console.log(`  litige perdu (REVERSED) : ${disputeTarget.reference}`);
+}
+
 async function main(): Promise<void> {
+  // Script one-shot qui pilote lui-même expireOverduePending() (voir
+  // withShortExpiry ci-dessus) : le vrai cron d'expiration (toutes les
+  // minutes) tournerait en concurrence et peut faire échouer une
+  // transaction Prisma en cours (P2028) — voir app.module.ts.
+  process.env.EXPIRATION_CRON_ENABLED = "false";
+
   const app = await NestFactory.createApplicationContext(AppModule);
   const prisma = app.get(PrismaService);
   const merchantsService = app.get(MerchantsService);
@@ -342,7 +463,8 @@ async function main(): Promise<void> {
   const transactions = app.get(TransactionsService);
 
   const merchants = await seedMerchantsAndKeys(prisma, merchantsService, apiKeys);
-  await seedTransactions(payments, transactions, merchants);
+  const seeded = await seedTransactions(payments, transactions, merchants);
+  await seedRefundsAndDispute(payments, transactions, seeded);
 
   await app.close();
 }
