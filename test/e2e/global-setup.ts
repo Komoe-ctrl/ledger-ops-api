@@ -22,7 +22,16 @@ export default async function globalSetup(): Promise<void> {
     stdio: "inherit",
   });
 
-  // Hérité par les workers Jest (processus enfants lancés après ce setup).
+  // Le rôle "ledger_app" (privilèges minimaux) n'existe qu'APRÈS que les
+  // migrations l'ont créé (migration least_privilege_app_role, ADR 0003) —
+  // c'est pour ça qu'on ne peut construire cette URL qu'ici, pas avant. Même
+  // hôte/port/base que le conteneur superutilisateur, juste un rôle différent.
+  const appUrl = new URL(databaseUrl);
+  appUrl.username = "ledger_app";
+  appUrl.password = "ledger_app_dev_only";
+
+  // Hérités par les workers Jest (processus enfants lancés après ce setup).
   process.env.DATABASE_URL = databaseUrl;
+  process.env.APP_DATABASE_URL = appUrl.toString();
   globalThis.__PG_CONTAINER__ = container;
 }

@@ -3,14 +3,25 @@ import { IsIn, IsInt, IsOptional, IsUrl, Max, Min, validateSync } from "class-va
 
 /**
  * Contrat des variables d'environnement attendues par l'API.
- * Seul DATABASE_URL est obligatoire : c'est la seule dépendance dure au
+ * DATABASE_URL et APP_DATABASE_URL sont les deux dépendances dures au
  * démarrage. REDIS_URL n'est requis que si PROVIDER_SIMULATOR_ENABLED=true
  * (voir ConditionalModule dans app.module.ts — sinon Redis n'est jamais
  * sollicité, donc jamais requis).
  */
 class EnvironmentVariables {
+  /** Rôle propriétaire : jamais utilisé par l'API elle-même, seulement par les migrations (voir prisma.config.ts). */
   @IsUrl({ protocols: ["postgresql", "postgres"], require_tld: false, require_protocol: true })
   DATABASE_URL!: string;
+
+  /**
+   * Rôle applicatif à privilèges minimaux (migration least_privilege_app_role,
+   * ADR 0003) : c'est CETTE variable que PrismaService utilise au runtime,
+   * jamais DATABASE_URL — un bug ou une injection SQL ne doit pas pouvoir,
+   * par exemple, UPDATE une ligne de grand livre, même si les triggers LX001
+   * le bloquent déjà (deuxième ligne de défense indépendante du code).
+   */
+  @IsUrl({ protocols: ["postgresql", "postgres"], require_tld: false, require_protocol: true })
+  APP_DATABASE_URL!: string;
 
   @IsOptional()
   @IsUrl({ protocols: ["redis"], require_tld: false, require_protocol: true })

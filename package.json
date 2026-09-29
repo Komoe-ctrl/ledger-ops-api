@@ -13,6 +13,7 @@
     "db:migrate:dev": "prisma migrate dev",
     "db:check-drift": "prisma migrate diff --from-migrations ./prisma/migrations --to-schema ./prisma/schema.prisma --exit-code",
     "db:test:integrity": "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f test/integrity.sql",
+    "db:test:least-privilege": "psql \"$APP_DATABASE_URL\" -v ON_ERROR_STOP=1 -f test/least-privilege.sql",
     "typecheck": "prisma generate && tsc --noEmit",
     "start:dev": "tsx watch src/main.ts",
     "build": "tsc",
