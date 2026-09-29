@@ -11,9 +11,11 @@ NestJS · TypeScript strict · PostgreSQL 17 · Prisma 7 · Redis 7 / BullMQ · 
 ```bash
 cp .env.example .env
 npm install
-npm run db:up               # PostgreSQL + Redis (Docker)
-npm run db:migrate          # applique les migrations
-npm run db:test:integrity   # vérifie les règles d'intégrité (base vide)
+npm run db:up                    # PostgreSQL + Redis (Docker)
+npm run db:migrate               # applique les migrations (crée aussi le rôle ledger_app, ADR 0003)
+npm run db:test:integrity        # vérifie les règles d'intégrité (base vide)
+npm run db:test:least-privilege  # vérifie les privilèges du rôle applicatif (base vide)
+npm run bootstrap:admin-key      # émet la première clé ADMIN (idempotent)
 ```
 
 ## Structure

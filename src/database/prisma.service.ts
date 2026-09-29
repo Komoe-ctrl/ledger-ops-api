@@ -18,7 +18,11 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   // la métadonnée `design:paramtypes` que Nest lit pour deviner quoi injecter.
   // @Inject fixe le token indépendamment de cette réflexion.
   constructor(@Inject(ConfigService) config: ConfigService) {
-    this.client = createPrismaClient(config.getOrThrow<string>("DATABASE_URL"));
+    // APP_DATABASE_URL, jamais DATABASE_URL : le rôle propriétaire ne se
+    // connecte qu'au moment des migrations (voir ADR 0003 et la migration
+    // least_privilege_app_role) — l'API tourne toujours avec le rôle à
+    // privilèges minimaux.
+    this.client = createPrismaClient(config.getOrThrow<string>("APP_DATABASE_URL"));
   }
 
   async onModuleInit(): Promise<void> {

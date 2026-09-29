@@ -25,4 +25,10 @@ Prisma décrit la structure ; ces règles sont en SQL manuel dans la migration. 
 ## Conséquences
 + Garanties indépendantes du code applicatif.
 − Logique répartie entre SQL et TypeScript : chaque règle SQL est documentée ici et testée.
-− À ajouter (jalon 4) : rôles PostgreSQL à privilèges minimaux (le rôle applicatif n'a ni `UPDATE` ni `DELETE` sur les tables comptables, ni écriture sur le référentiel de transitions).
+
+## Addendum (jalon 4) — rôles PostgreSQL à privilèges minimaux
+La migration `least_privilege_app_role` crée un rôle `ledger_app`, distinct du rôle propriétaire qui exécute les migrations. L'API se connecte toujours avec `ledger_app` (`APP_DATABASE_URL`), jamais avec le rôle propriétaire (`DATABASE_URL`, réservé aux migrations).
+
+`ledger_app` n'a ni `UPDATE` ni `DELETE` sur `journal_entries`, `ledger_postings`, `transaction_status_history` (SELECT/INSERT seulement — cohérent avec LX001 : la protection existe maintenant à deux niveaux indépendants, trigger et privilège) ; `SELECT` seul sur `transaction_status_transitions` (référentiel jamais écrit par l'app) ; aucun droit de `CREATE`/`ALTER`/`DROP`. Un bug applicatif ou une injection SQL ne peut donc pas corrompre le grand livre même en contournant entièrement le code TypeScript — l'erreur serait `42501` (insufficient_privilege), avant même qu'un trigger n'ait la moindre chance de s'exécuter.
+
+Vérifié par `test/least-privilege.sql` (à exécuter avec `APP_DATABASE_URL`, symétrique de `test/integrity.sql`).
