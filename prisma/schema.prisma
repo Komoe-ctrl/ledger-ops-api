@@ -77,6 +77,18 @@ enum ApiRole {
   ADMIN
 }
 
+/// LATE_ACKNOWLEDGMENT : seul type créé automatiquement (ADR 0007, effet de
+/// bord de TransactionsService.transition() sur EXPIRED -> SUCCEEDED refusé).
+/// Les trois autres : écarts avec un relevé opérateur, rapportés via
+/// ReconciliationService.reportDiscrepancy() — pas de modèle "relevé
+/// opérateur" ni de moteur de diff, périmètre volontairement strict (jalon 5).
+enum ReconciliationExceptionKind {
+  LATE_ACKNOWLEDGMENT
+  MISSING_IN_STATEMENT
+  MISSING_LOCALLY
+  AMOUNT_MISMATCH
+}
+
 // ---------------------------------------------------------------------------
 // Grand livre (partie double)
 // ---------------------------------------------------------------------------
@@ -270,19 +282,25 @@ model TransactionStatusTransition {
 /// un cul-de-sac (jamais EXPIRED -> SUCCEEDED) — ceci ne rouvre rien, ça
 /// donne juste à un humain de quoi trancher. Voir ADR 0007.
 model ReconciliationException {
-  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  transactionId     String            @map("transaction_id") @db.Uuid
-  /// Ce que l'opérateur prétend (typiquement SUCCEEDED).
-  reportedStatus    TransactionStatus @map("reported_status")
-  providerReference String?           @map("provider_reference") @db.VarChar(100)
-  detectedAt        DateTime          @default(now()) @map("detected_at") @db.Timestamptz(3)
+  id   String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kind ReconciliationExceptionKind
+  /// NULL seulement pour MISSING_LOCALLY : par définition, aucune transaction
+  /// locale ne correspond (contrainte CHECK en base — voir migration).
+  transactionId String?            @map("transaction_id") @db.Uuid
+  /// Ce que l'opérateur prétend ; ne fait sens que pour LATE_ACKNOWLEDGMENT
+  /// (contrainte CHECK en base).
+  reportedStatus    TransactionStatus? @map("reported_status")
+  providerReference String?            @map("provider_reference") @db.VarChar(100)
+  /// Description libre de l'écart, pour les 3 types autres que LATE_ACKNOWLEDGMENT.
+  detail            String?            @db.VarChar(500)
+  detectedAt        DateTime           @default(now()) @map("detected_at") @db.Timestamptz(3)
   /// Les trois champs suivants se posent ensemble, une seule fois.
-  resolvedAt        DateTime?         @map("resolved_at") @db.Timestamptz(3)
-  resolvedBy        String?           @map("resolved_by") @db.VarChar(100)
+  resolvedAt        DateTime?          @map("resolved_at") @db.Timestamptz(3)
+  resolvedBy        String?            @map("resolved_by") @db.VarChar(100)
   /// Justification obligatoire à la résolution — jamais vide une fois posée.
-  resolution        String?           @db.VarChar(2000)
+  resolution        String?            @db.VarChar(2000)
 
-  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: Restrict)
 
   @@index([transactionId])
   @@index([resolvedAt])

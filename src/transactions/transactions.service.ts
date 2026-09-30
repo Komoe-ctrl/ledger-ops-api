@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, PreconditionFailedException } from "@nestjs/common";
 import { Clock } from "../common/clock";
 import { PrismaService } from "../database/prisma.service";
-import { Prisma, TransactionStatus, TransactionType, withActor } from "../database/prisma";
+import { Prisma, ReconciliationExceptionKind, TransactionStatus, TransactionType, withActor } from "../database/prisma";
 import { ListTransactionsQueryDto } from "./dto/list-transactions.query.dto";
 import { TransitionStatusDto } from "./dto/transition-status.dto";
 import { decodeCursor, encodeCursor } from "./cursor.util";
@@ -125,6 +125,7 @@ export class TransactionsService {
         if (row.status === TransactionStatus.EXPIRED && dto.status === TransactionStatus.SUCCEEDED) {
           const exception = await tx.reconciliationException.create({
             data: {
+              kind: ReconciliationExceptionKind.LATE_ACKNOWLEDGMENT,
               transactionId: row.id,
               reportedStatus: dto.status,
               providerReference: dto.providerReference ?? null,

@@ -4,8 +4,10 @@ import { ApiKeysService } from "../src/auth/api-keys.service";
 import { MerchantsService } from "../src/merchants/merchants.service";
 import { PaymentsService } from "../src/payments/payments.service";
 import { TransactionsService } from "../src/transactions/transactions.service";
+import { ReconciliationService } from "../src/reconciliation/reconciliation.service";
+import { ReconciliationRequiredException } from "../src/transactions/reconciliation-required.exception";
 import { PrismaService } from "../src/database/prisma.service";
-import { ApiRole, Merchant, Prisma, Provider, TransactionStatus } from "../src/database/prisma";
+import { ApiRole, Merchant, Prisma, Provider, ReconciliationExceptionKind, TransactionStatus } from "../src/database/prisma";
 import { CreateMerchantDto } from "../src/merchants/dto/create-merchant.dto";
 import { CreatePaymentDto } from "../src/payments/dto/create-payment.dto";
 
@@ -448,6 +450,121 @@ async function seedRefundsAndDispute(
   console.log(`  litige perdu (REVERSED) : ${disputeTarget.reference}`);
 }
 
+// ---------------------------------------------------------------------------
+// Étape 4 : exceptions de rapprochement
+// ---------------------------------------------------------------------------
+
+const MISSING_LOCALLY_PROVIDER_REFERENCE = "OM-FANTOME-0001";
+
+/**
+ * `reportDiscrepancy()` (comme `ApiKeysService.create()`) n'a aucune notion
+ * d'idempotence intégrée — chaque appel insère une nouvelle ligne. Sûr à
+ * ré-exécuter : on vérifie qu'aucune exception de ce kind pour cette cible
+ * n'existe déjà avant d'en créer une (même esprit que reissueApiKey pour les
+ * clés, en plus strict : ici on ne recrée rien du tout si ça existe déjà).
+ */
+async function reportDiscrepancyIfMissing(
+  prisma: PrismaService,
+  reconciliation: ReconciliationService,
+  kind: ReconciliationExceptionKind,
+  transactionId: string | null,
+  build: () => Parameters<ReconciliationService["reportDiscrepancy"]>[0],
+): Promise<void> {
+  const existing = await prisma.client.reconciliationException.findFirst({ where: { kind, transactionId } });
+  if (existing) return;
+  await reconciliation.reportDiscrepancy(build());
+}
+
+async function seedReconciliationExceptions(
+  prisma: PrismaService,
+  transactions: TransactionsService,
+  reconciliation: ReconciliationService,
+  seeded: SeededTransaction[],
+): Promise<void> {
+  console.log("--- Exceptions de rapprochement ---");
+
+  // 1) Acquittement tardif (ADR 0007) : SEUL type créé automatiquement, par
+  // le chemin réel EXPIRED -> SUCCEEDED refusé (TransactionsService.transition,
+  // pas un appel direct à reportDiscrepancy). Cible : une transaction EXPIRED
+  // du lot de l'étape 2.
+  const lateAckTarget = seeded.find((s) => s.status === TransactionStatus.EXPIRED);
+  if (!lateAckTarget) {
+    throw new Error("Aucune transaction EXPIRED disponible pour l'exception d'acquittement tardif");
+  }
+  const lateAckTx = await transactions.findByReferenceOrThrow(lateAckTarget.reference);
+  const alreadyReported = await prisma.client.reconciliationException.findFirst({
+    where: { transactionId: lateAckTx.id, kind: ReconciliationExceptionKind.LATE_ACKNOWLEDGMENT },
+  });
+  if (!alreadyReported) {
+    try {
+      await transactions.transition(
+        lateAckTarget.reference,
+        { status: TransactionStatus.SUCCEEDED, providerReference: "SEED-LATE-ACK-0001" },
+        lateAckTx.version,
+      );
+      throw new Error(
+        `Transition EXPIRED -> SUCCEEDED sur ${lateAckTarget.reference} aurait dû être refusée (ReconciliationRequiredException)`,
+      );
+    } catch (err) {
+      if (!(err instanceof ReconciliationRequiredException)) {
+        throw err;
+      }
+    }
+  }
+  console.log(`  acquittement tardif : ${lateAckTarget.reference}`);
+
+  // 2, 3, 4) Écarts avec le relevé opérateur — reportDiscrepancy(), périmètre
+  // strict (ADR 0008) : pas de modèle "relevé", pas de moteur de diff. Cibles
+  // par position, comme à l'étape 3 (indices 3 et 4, distincts des cibles
+  // remboursement/litige déjà pris aux indices 0-2).
+  const missingInStatementTarget = seeded[3];
+  const amountMismatchTarget = seeded[4];
+  if (!missingInStatementTarget || !amountMismatchTarget) {
+    throw new Error("Pas assez de transactions pour les écarts de relevé de démo");
+  }
+
+  const missingInStatementTx = await transactions.findByReferenceOrThrow(missingInStatementTarget.reference);
+  await reportDiscrepancyIfMissing(
+    prisma,
+    reconciliation,
+    ReconciliationExceptionKind.MISSING_IN_STATEMENT,
+    missingInStatementTx.id,
+    () => ({
+      kind: ReconciliationExceptionKind.MISSING_IN_STATEMENT,
+      transactionId: missingInStatementTx.id,
+      detail: "Transaction présente dans notre grand livre, absente du relevé Orange Money du jour.",
+    }),
+  );
+  console.log(`  absente du relevé : ${missingInStatementTarget.reference}`);
+
+  await reportDiscrepancyIfMissing(
+    prisma,
+    reconciliation,
+    ReconciliationExceptionKind.MISSING_LOCALLY,
+    null,
+    () => ({
+      kind: ReconciliationExceptionKind.MISSING_LOCALLY,
+      providerReference: MISSING_LOCALLY_PROVIDER_REFERENCE,
+      detail: "Le relevé Orange Money mentionne cette référence opérateur ; aucune transaction correspondante en base.",
+    }),
+  );
+  console.log(`  absente chez nous : ${MISSING_LOCALLY_PROVIDER_REFERENCE}`);
+
+  const amountMismatchTx = await transactions.findByReferenceOrThrow(amountMismatchTarget.reference);
+  await reportDiscrepancyIfMissing(
+    prisma,
+    reconciliation,
+    ReconciliationExceptionKind.AMOUNT_MISMATCH,
+    amountMismatchTx.id,
+    () => ({
+      kind: ReconciliationExceptionKind.AMOUNT_MISMATCH,
+      transactionId: amountMismatchTx.id,
+      detail: `Relevé opérateur : ${amountMismatchTx.amount + 500n} XOF — grand livre : ${amountMismatchTx.amount} XOF.`,
+    }),
+  );
+  console.log(`  écart de montant : ${amountMismatchTarget.reference}`);
+}
+
 async function main(): Promise<void> {
   // Script one-shot qui pilote lui-même expireOverduePending() (voir
   // withShortExpiry ci-dessus) : le vrai cron d'expiration (toutes les
@@ -461,10 +578,12 @@ async function main(): Promise<void> {
   const apiKeys = app.get(ApiKeysService);
   const payments = app.get(PaymentsService);
   const transactions = app.get(TransactionsService);
+  const reconciliation = app.get(ReconciliationService);
 
   const merchants = await seedMerchantsAndKeys(prisma, merchantsService, apiKeys);
   const seeded = await seedTransactions(payments, transactions, merchants);
   await seedRefundsAndDispute(payments, transactions, seeded);
+  await seedReconciliationExceptions(prisma, transactions, reconciliation, seeded);
 
   await app.close();
 }
