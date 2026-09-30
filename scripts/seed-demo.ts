@@ -565,6 +565,61 @@ async function seedReconciliationExceptions(
   console.log(`  écart de montant : ${amountMismatchTarget.reference}`);
 }
 
+// ---------------------------------------------------------------------------
+// Étape 5 : vérification finale
+// ---------------------------------------------------------------------------
+
+/**
+ * Vérifie que le seed n'a produit aucun grand livre déséquilibré — pas une
+ * simple formalité : si `v_trial_balance_violations` n'est pas vide, le
+ * script DOIT échouer bruyamment plutôt que de laisser une démo publique
+ * afficher des comptes qui ne balancent pas.
+ *
+ * `created_at` reste toujours l'heure réelle d'exécution (voir l'en-tête du
+ * fichier) : le résumé final l'assume explicitement — "jeu de démonstration
+ * chargé le <horodatage>", jamais une fausse "activité du jour".
+ */
+async function verifyAndSummarize(prisma: PrismaService): Promise<void> {
+  console.log("--- Vérification finale ---");
+
+  const violations = await prisma.client.$queryRaw<
+    { currency: string; total_debit: bigint; total_credit: bigint }[]
+  >`SELECT * FROM v_trial_balance_violations`;
+  if (violations.length > 0) {
+    const serialized = violations.map((v) => ({
+      currency: v.currency,
+      total_debit: v.total_debit.toString(),
+      total_credit: v.total_credit.toString(),
+    }));
+    throw new Error(`Grand livre déséquilibré : ${JSON.stringify(serialized)}`);
+  }
+  console.log("  grand livre équilibré (v_trial_balance_violations vide)");
+
+  const [transactionCounts, exceptionCounts] = await Promise.all([
+    prisma.client.transaction.groupBy({
+      by: ["status"],
+      _count: { _all: true },
+      where: { idempotencyKey: { startsWith: "seed-demo-" } },
+    }),
+    prisma.client.reconciliationException.groupBy({
+      by: ["kind"],
+      _count: { _all: true },
+    }),
+  ]);
+
+  console.log(
+    "  transactions par statut :",
+    Object.fromEntries(transactionCounts.map((c) => [c.status, c._count._all])),
+  );
+  console.log(
+    "  exceptions par type     :",
+    Object.fromEntries(exceptionCounts.map((c) => [c.kind, c._count._all])),
+  );
+
+  console.log("");
+  console.log(`Jeu de démonstration chargé le ${new Date().toISOString()}.`);
+}
+
 async function main(): Promise<void> {
   // Script one-shot qui pilote lui-même expireOverduePending() (voir
   // withShortExpiry ci-dessus) : le vrai cron d'expiration (toutes les
@@ -584,6 +639,7 @@ async function main(): Promise<void> {
   const seeded = await seedTransactions(payments, transactions, merchants);
   await seedRefundsAndDispute(payments, transactions, seeded);
   await seedReconciliationExceptions(prisma, transactions, reconciliation, seeded);
+  await verifyAndSummarize(prisma);
 
   await app.close();
 }
