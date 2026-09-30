@@ -4,8 +4,13 @@ import { Prisma, PrismaClient } from "../generated/prisma/client";
 export * from "../generated/prisma/client";
 export { LedgerErrorCode, extractLedgerErrorCode, extractLedgerErrorMessage, isLedgerError } from "./ledger-errors";
 
-export function createPrismaClient(connectionString: string): PrismaClient {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+/**
+ * `poolMax` borne le pool `pg` sous-jacent — jamais sa valeur par défaut
+ * (souvent bien plus haute que ce qu'une base Postgres managée gratuite
+ * tolère face à une seule instance d'API, voir docs/DEPLOIEMENT.md).
+ */
+export function createPrismaClient(connectionString: string, poolMax = 5): PrismaClient {
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString, max: poolMax }) });
 }
 
 /** Qui agit. Obligatoire pour tout changement de statut (la base refuse sinon : LX007). */
