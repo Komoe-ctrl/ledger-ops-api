@@ -1,3 +1,4 @@
+import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "../src/app.module";
 import { ApiKeysService } from "../src/auth/api-keys.service";

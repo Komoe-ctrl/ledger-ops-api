@@ -22,7 +22,16 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     // connecte qu'au moment des migrations (voir ADR 0003 et la migration
     // least_privilege_app_role) — l'API tourne toujours avec le rôle à
     // privilèges minimaux.
-    this.client = createPrismaClient(config.getOrThrow<string>("APP_DATABASE_URL"));
+    //
+    // ConfigService.get() renvoie la chaîne brute de process.env (vérifié
+    // empiriquement — la validation au bootstrap ne coerce pas ce que
+    // .get() relit ensuite), d'où la conversion explicite plutôt que de
+    // faire confiance au paramètre de type générique.
+    const poolMaxRaw = config.get<string>("DATABASE_POOL_MAX");
+    this.client = createPrismaClient(
+      config.getOrThrow<string>("APP_DATABASE_URL"),
+      poolMaxRaw ? Number(poolMaxRaw) : undefined,
+    );
   }
 
   async onModuleInit(): Promise<void> {
