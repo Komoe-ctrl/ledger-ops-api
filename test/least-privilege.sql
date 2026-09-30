@@ -60,6 +60,14 @@ FROM e,
 JOIN ledger_accounts a ON a.code = v.code;
 COMMIT;
 
+-- Les deux vues de lecture (init_ledger) : une vue vérifie le privilège
+-- SELECT sur ELLE-MÊME, pas seulement sur les tables sous-jacentes — un
+-- GRANT sur les tables ne suffit pas. Oublié une première fois par la
+-- migration least_privilege_app_role, découvert en faisant vérifier
+-- l'équilibre du grand livre par le seed de démo (jalon 5).
+SELECT count(*) FROM v_account_balances;
+SELECT count(*) FROM v_trial_balance_violations;
+
 -- ---------------------------------------------------------------------------
 -- Négatif : tout ce que l'app n'a jamais besoin de faire doit être refusé
 -- au niveau du privilège, avant même d'atteindre un trigger. `WHERE false`
