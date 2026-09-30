@@ -3,15 +3,25 @@ import { IsIn, IsInt, IsOptional, IsUrl, Max, Min, validateSync } from "class-va
 
 /**
  * Contrat des variables d'environnement attendues par l'API.
- * DATABASE_URL et APP_DATABASE_URL sont les deux dépendances dures au
- * démarrage. REDIS_URL n'est requis que si PROVIDER_SIMULATOR_ENABLED=true
- * (voir ConditionalModule dans app.module.ts — sinon Redis n'est jamais
- * sollicité, donc jamais requis).
+ * Seule APP_DATABASE_URL est une dépendance dure au démarrage de
+ * l'application elle-même. REDIS_URL n'est requis que si
+ * PROVIDER_SIMULATOR_ENABLED=true (voir ConditionalModule dans
+ * app.module.ts — sinon Redis n'est jamais sollicité, donc jamais requis).
  */
 class EnvironmentVariables {
-  /** Rôle propriétaire : jamais utilisé par l'API elle-même, seulement par les migrations (voir prisma.config.ts). */
+  /**
+   * Rôle propriétaire : jamais lu par le code applicatif (voir PrismaService,
+   * qui n'utilise que APP_DATABASE_URL), seulement par la CLI Prisma
+   * (prisma.config.ts, validé indépendamment par elle) au moment des
+   * migrations. Optionnel ICI à dessein : en déploiement, le service web qui
+   * tourne en continu ne doit même pas avoir cette variable dans son
+   * environnement (voir docs/DEPLOIEMENT.md) — la rendre obligatoire au
+   * bootstrap de l'app la forcerait à exister partout, y compris là où on
+   * veut spécifiquement qu'elle soit absente.
+   */
+  @IsOptional()
   @IsUrl({ protocols: ["postgresql", "postgres"], require_tld: false, require_protocol: true })
-  DATABASE_URL!: string;
+  DATABASE_URL?: string;
 
   /**
    * Rôle applicatif à privilèges minimaux (migration least_privilege_app_role,
@@ -22,6 +32,17 @@ class EnvironmentVariables {
    */
   @IsUrl({ protocols: ["postgresql", "postgres"], require_tld: false, require_protocol: true })
   APP_DATABASE_URL!: string;
+
+  /**
+   * Borne le pool `pg` sous-jacent (voir docs/DEPLOIEMENT.md) — une base
+   * Postgres managée gratuite tolère peu de connexions simultanées. 5 par
+   * défaut si absent (voir createPrismaClient).
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  DATABASE_POOL_MAX?: number;
 
   @IsOptional()
   @IsUrl({ protocols: ["redis"], require_tld: false, require_protocol: true })
