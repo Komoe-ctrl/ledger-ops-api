@@ -4,6 +4,18 @@ API du back-office **ledger-ops** : opérations de paiement mobile money (Orange
 
 Frontend : [ledger-ops-web](../ledger-ops-web) — il consomme cette API via son contrat OpenAPI.
 
+## Démo publique
+
+- API : `TODO — URL une fois déployée`
+- Documentation interactive (Swagger) : `TODO/docs`
+- Clé API `MERCHANT` (créer des paiements) : `TODO`
+- Clé API `ANALYST` (lire le rapprochement) : `TODO`
+
+La base se remet à zéro chaque nuit (voir [docs/DEPLOIEMENT.md](docs/DEPLOIEMENT.md)) :
+les clés ci-dessus sont rotées à chaque remise à zéro, celles-ci peuvent donc devenir
+invalides du jour au lendemain. Aucune clé `ADMIN` n'existe sur cette instance — c'est
+volontaire (voir ADR 0003 et `docs/DEPLOIEMENT.md`).
+
 ## Stack
 NestJS · TypeScript strict · PostgreSQL 17 · Prisma 7 · Redis 7 / BullMQ · Jest + Testcontainers
 
@@ -30,13 +42,22 @@ Remplit la base avec une activité crédible : 3 marchands, ~70 paiements répar
 - `created_at` reste toujours l'heure réelle d'exécution (imposé par la base, ADR 0003) : le script ne fabrique pas une fausse journée passée, il produit une activité récente et réelle. D'où la ligne finale `"Jeu de démonstration chargé le <horodatage>"`, pas une "activité du jour" fictive.
 - En production, ce script tourne après un reset complet (tâche planifiée) — pas de rôle ADMIN dans sa sortie : une démo publique ne doit exposer que des clés `MERCHANT`/`ANALYST`.
 
+## Déploiement
+
+Railway, PostgreSQL managé, une image Docker (`Dockerfile`, racine du repo) partagée
+entre deux services distincts — un service public sans jamais le rôle propriétaire de
+la base dans son environnement, un service interne pour les migrations et la remise à
+zéro nocturne. Procédure complète, variables d'environnement par service et
+justification du découpage : [docs/DEPLOIEMENT.md](docs/DEPLOIEMENT.md).
+
 ## Structure
 ```
 prisma/            schéma + migrations (dont les règles d'intégrité en SQL)
 src/database/      client Prisma, withActor(), codes d'erreur LX0xx
-scripts/           bootstrap admin, seed de démo (hors HTTP, NestFactory.createApplicationContext)
+scripts/           bootstrap admin, seed de démo, remise à zéro (hors HTTP ou en SQL direct)
 test/              tests d'intégrité + privilèges SQL, suite e2e (Jest + Testcontainers)
 docs/adr/          décisions d'architecture
+docs/DEPLOIEMENT.md  procédure de déploiement (Railway)
 ```
 
 ## Feuille de route
@@ -44,7 +65,7 @@ docs/adr/          décisions d'architecture
 2. Paiements : API, machine à états, idempotence, écritures comptables — terminé
 3. Remboursements, litiges, expiration automatique, simulateur opérateur — terminé
 4. Authentification par clés API, rôles (RBAC), rôle PostgreSQL à privilèges minimaux — terminé
-5. Jeu de données de démonstration, documentation ← en cours
+5. Jeu de données de démonstration, mise en ligne (Docker, CORS, rate limiting, documentation) — terminé, en attente du premier déploiement réel pour remplir les URLs/clés ci-dessus
 
 ## Décisions d'architecture
 - [0001 — Grand livre en partie double](docs/adr/0001-grand-livre-partie-double.md)
