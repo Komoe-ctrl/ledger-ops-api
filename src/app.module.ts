@@ -12,6 +12,7 @@ import { TransactionsModule } from "./transactions/transactions.module";
 import { ExpirationModule } from "./expiration/expiration.module";
 import { ReconciliationModule } from "./reconciliation/reconciliation.module";
 import { ProviderSimulatorModule } from "./provider-simulator/provider-simulator.module";
+import { RateLimitModule } from "./rate-limit/rate-limit.module";
 
 @Module({
   imports: [
@@ -47,6 +48,15 @@ import { ProviderSimulatorModule } from "./provider-simulator/provider-simulator
     ConditionalModule.registerWhen(
       ProviderSimulatorModule,
       (env: NodeJS.ProcessEnv) => env.PROVIDER_SIMULATOR_ENABLED === "true",
+    ),
+    // Activé par défaut, comme le cron d'expiration. Désactivé en e2e (voir
+    // global-setup.ts) : la suite tire des dizaines de requêtes en quelques
+    // secondes (ex. le test "10 requêtes concurrentes"), largement de quoi
+    // franchir une limite pensée pour un visiteur humain et rendre la suite
+    // flaky pour une raison qui n'a rien à voir avec ce qu'elle teste.
+    ConditionalModule.registerWhen(
+      RateLimitModule,
+      (env: NodeJS.ProcessEnv) => env.RATE_LIMIT_ENABLED !== "false",
     ),
   ],
   controllers: [],

@@ -36,6 +36,12 @@ export default async function globalSetup(): Promise<void> {
   // Prisma (P2028) que dans les scripts one-shot — voir app.module.ts.
   process.env.EXPIRATION_CRON_ENABLED = "false";
 
+  // La suite tire des dizaines de requêtes en quelques secondes (ex. "10
+  // requêtes concurrentes") — largement de quoi franchir une limite pensée
+  // pour un visiteur humain et rendre la suite flaky pour une raison qui
+  // n'a rien à voir avec ce qu'elle teste — voir app.module.ts.
+  process.env.RATE_LIMIT_ENABLED = "false";
+
   // Hérités par les workers Jest (processus enfants lancés après ce setup).
   process.env.DATABASE_URL = databaseUrl;
   process.env.APP_DATABASE_URL = appUrl.toString();
