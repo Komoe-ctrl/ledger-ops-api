@@ -3,10 +3,15 @@ import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
 import { configureApp } from "./app.config";
+import { resolveCorsOrigins } from "./config/cors.util";
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   configureApp(app);
+
+  // Le front (Vercel) appelle cette API depuis un domaine différent — en
+  // développement local, pas de restriction (voir resolveCorsOrigins).
+  app.enableCors({ origin: resolveCorsOrigins(process.env.CORS_ALLOWED_ORIGINS) });
 
   // Contrat de référence pour la génération de types côté front. Servi en
   // dev/jalon 2 ; à restreindre (auth) avant tout déploiement public.

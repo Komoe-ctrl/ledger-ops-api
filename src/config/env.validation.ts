@@ -1,5 +1,5 @@
 import { plainToInstance } from "class-transformer";
-import { IsIn, IsInt, IsOptional, IsUrl, Max, Min, validateSync } from "class-validator";
+import { IsIn, IsInt, IsOptional, IsString, IsUrl, Max, Min, validateSync } from "class-validator";
 
 /**
  * Contrat des variables d'environnement attendues par l'API.
@@ -112,6 +112,11 @@ class EnvironmentVariables {
   @IsOptional()
   @IsIn(["true", "false"])
   EXPIRATION_CRON_ENABLED?: string;
+
+  /** Liste d'origines séparées par des virgules (voir resolveCorsOrigins). Non configuré = pas de restriction. */
+  @IsOptional()
+  @IsString()
+  CORS_ALLOWED_ORIGINS?: string;
 }
 
 /**

@@ -1,4 +1,5 @@
 import { Controller, Get, Inject, ServiceUnavailableException } from "@nestjs/common";
+import { SkipThrottle } from "@nestjs/throttler";
 import { PrismaService } from "../database/prisma.service";
 
 /**
@@ -6,7 +7,13 @@ import { PrismaService } from "../database/prisma.service";
  * le process Node tourne. Un load balancer ou un orchestrateur qui router
  * du trafic vers une instance dont la base est injoignable enverrait des
  * 500 en boucle sans que rien ne l'avertisse autrement.
+ *
+ * @SkipThrottle() : le sondage de la plateforme (toutes les N secondes) ne
+ * doit jamais se faire bloquer par la limite pensée pour un visiteur humain
+ * — sans quoi la plateforme croirait l'instance en panne à cause de sa
+ * propre vérification.
  */
+@SkipThrottle()
 @Controller("health")
 export class HealthController {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
