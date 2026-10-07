@@ -11,10 +11,12 @@ Frontend : [ledger-ops-web](../ledger-ops-web) — il consomme cette API via son
 - Clé API `MERCHANT` (créer des paiements) : `TODO`
 - Clé API `ANALYST` (lire le rapprochement) : `TODO`
 
-La base se remet à zéro chaque nuit (voir [docs/DEPLOIEMENT.md](docs/DEPLOIEMENT.md)) :
-les clés ci-dessus sont rotées à chaque remise à zéro, celles-ci peuvent donc devenir
-invalides du jour au lendemain. Aucune clé `ADMIN` n'existe sur cette instance — c'est
-volontaire (voir ADR 0003 et `docs/DEPLOIEMENT.md`).
+La base se remet à zéro chaque nuit (voir [docs/DEPLOIEMENT.md](docs/DEPLOIEMENT.md)),
+mais les clés ci-dessus restent **stables** d'une remise à zéro à l'autre
+(`DEMO_MERCHANT_API_KEY`/`DEMO_ANALYST_API_KEY` fixées sur le service de
+maintenance — voir `scripts/seed-demo.ts`) : pas besoin de revenir ici après
+chaque nuit. Aucune clé `ADMIN` n'existe sur cette instance — c'est volontaire
+(voir ADR 0003 et `docs/DEPLOIEMENT.md`).
 
 ## Stack
 NestJS · TypeScript strict · PostgreSQL 17 · Prisma 7 · Redis 7 / BullMQ · Jest + Testcontainers
