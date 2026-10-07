@@ -10,7 +10,13 @@ export { LedgerErrorCode, extractLedgerErrorCode, extractLedgerErrorMessage, isL
  * tolère face à une seule instance d'API, voir docs/DEPLOIEMENT.md).
  */
 export function createPrismaClient(connectionString: string, poolMax = 5): PrismaClient {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString, max: poolMax }) });
+  return new PrismaClient({
+    adapter: new PrismaPg({ connectionString, max: poolMax }),
+    // Le défaut de 2 s est trop court pour une première connexion à froid
+    // (pool vide, base qui vient de démarrer) : le temps d'établir la
+    // connexion dépasserait maxWait avant même que la transaction ne débute.
+    transactionOptions: { maxWait: 10_000 },
+  });
 }
 
 /** Qui agit. Obligatoire pour tout changement de statut (la base refuse sinon : LX007). */
