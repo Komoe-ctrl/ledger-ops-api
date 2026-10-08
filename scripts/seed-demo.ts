@@ -1,7 +1,8 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "../src/app.module";
-import { ApiKeysService } from "../src/auth/api-keys.service";
+import { ApiKeysService, CreatedApiKey } from "../src/auth/api-keys.service";
+import { hashApiKey } from "../src/auth/hash.util";
 import { MerchantsService } from "../src/merchants/merchants.service";
 import { PaymentsService } from "../src/payments/payments.service";
 import { TransactionsService } from "../src/transactions/transactions.service";
@@ -24,8 +25,11 @@ import { CreatePaymentDto } from "../src/payments/dto/create-payment.dto";
  * nocturne) :
  * - marchands : identifiés par leur "code" unique, jamais recréés si déjà
  *   présents (voir getOrCreateMerchant).
- * - clés API de démo : identifiées par un label stable ("seed:demo:*"),
- *   révoquées puis réémises à chaque exécution.
+ * - clés API de démo : identifiées par un label stable ("seed:demo:*").
+ *   Révoquées puis réémises (valeur aléatoire) à chaque exécution par
+ *   défaut, ou valeur fixe si DEMO_MERCHANT_API_KEY/DEMO_ANALYST_API_KEY
+ *   est définie — pour que le README/le front gardent une clé valide après
+ *   la remise à zéro nocturne (voir resolveFixedApiKey).
  * - transactions : idempotency-key déterministe par scénario
  *   ("seed-demo-payment-0001"...) — un rejeu retrouve la même transaction
  *   sans en recréer une autre, et les transitions déjà jouées ne sont pas
@@ -48,6 +52,9 @@ const MERCHANT_KEY_MERCHANT_CODE = "boutique_akwaba";
 
 const SEED_MERCHANT_KEY_LABEL = "seed:demo:merchant";
 const SEED_ANALYST_KEY_LABEL = "seed:demo:analyst";
+
+const DEMO_MERCHANT_API_KEY_ENV = "DEMO_MERCHANT_API_KEY";
+const DEMO_ANALYST_API_KEY_ENV = "DEMO_ANALYST_API_KEY";
 
 // ---------------------------------------------------------------------------
 // Étape 1 : marchands + clés API de démo
@@ -80,12 +87,88 @@ async function reissueApiKey(
   label: string,
   role: ApiRole,
   merchantId?: string,
-) {
+): Promise<CreatedApiKey> {
   const existing = await prisma.client.apiKey.findMany({ where: { label, isActive: true } });
   for (const key of existing) {
     await apiKeys.revoke(key.id);
   }
   return apiKeys.create({ label, role, merchantId });
+}
+
+function readFixedKeyEnv(name: string): string | undefined {
+  const value = process.env[name];
+  return value && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Logique pour une clé API de démo dont la valeur en clair est imposée par
+ * l'environnement (DEMO_MERCHANT_API_KEY / DEMO_ANALYST_API_KEY) plutôt que
+ * générée aléatoirement — pour que le README/le front gardent une clé
+ * valide d'une remise à zéro nocturne à l'autre.
+ *
+ * - déjà active, même rôle/marchand : conservée telle quelle, aucune
+ *   écriture (rejouer create() produirait un hash identique de toute façon,
+ *   mais pas besoin d'y toucher).
+ * - déjà révoquée : erreur explicite — LX006 interdit toute dé-révocation,
+ *   inutile de laisser Postgres le dire à notre place avec un message
+ *   cryptique à ce stade du seed.
+ * - existe avec un autre rôle ou marchand : erreur explicite — changer
+ *   silencieusement l'un ou l'autre serait une bien plus grosse surprise
+ *   qu'un échec net.
+ * - absente : révoque les clés actives du même label (même comportement que
+ *   reissueApiKey), puis crée la clé fixe.
+ */
+async function resolveFixedApiKey(
+  prisma: PrismaService,
+  apiKeys: ApiKeysService,
+  label: string,
+  role: ApiRole,
+  rawKey: string,
+  merchantId?: string,
+): Promise<CreatedApiKey> {
+  const hashedKey = hashApiKey(rawKey);
+  const existing = await prisma.client.apiKey.findUnique({ where: { hashedKey } });
+
+  if (existing) {
+    if (!existing.isActive) {
+      throw new Error(
+        `${label} : la valeur fournie correspond à une clé déjà révoquée (id ${existing.id}) — ` +
+          "une clé révoquée ne se réactive jamais (LX006). Choisissez une nouvelle valeur.",
+      );
+    }
+    if (existing.role !== role || existing.merchantId !== (merchantId ?? null)) {
+      throw new Error(
+        `${label} : la valeur fournie correspond déjà à une clé existante (id ${existing.id}) mais avec un ` +
+          `rôle ou un marchand différent (role=${existing.role}, merchantId=${existing.merchantId ?? "null"}).`,
+      );
+    }
+    return {
+      apiKey: { id: existing.id, label: existing.label, role: existing.role, merchantId: existing.merchantId },
+      rawKey,
+    };
+  }
+
+  const activeForLabel = await prisma.client.apiKey.findMany({ where: { label, isActive: true } });
+  for (const key of activeForLabel) {
+    await apiKeys.revoke(key.id);
+  }
+  return apiKeys.create({ label, role, merchantId }, { rawKey });
+}
+
+/** Clé fixe si la variable d'environnement correspondante est définie, sinon comportement aléatoire habituel. */
+async function resolveApiKey(
+  prisma: PrismaService,
+  apiKeys: ApiKeysService,
+  label: string,
+  role: ApiRole,
+  envVarName: string,
+  merchantId?: string,
+): Promise<CreatedApiKey> {
+  const fixedRawKey = readFixedKeyEnv(envVarName);
+  if (fixedRawKey) {
+    return resolveFixedApiKey(prisma, apiKeys, label, role, fixedRawKey, merchantId);
+  }
+  return reissueApiKey(prisma, apiKeys, label, role, merchantId);
 }
 
 async function seedMerchantsAndKeys(
@@ -106,9 +189,24 @@ async function seedMerchantsAndKeys(
     throw new Error(`Marchand ${MERCHANT_KEY_MERCHANT_CODE} introuvable après création — incohérence dans DEMO_MERCHANTS`);
   }
 
-  console.log("--- Clés API de démo (révoquées puis réémises) ---");
-  const merchantKey = await reissueApiKey(prisma, apiKeys, SEED_MERCHANT_KEY_LABEL, ApiRole.MERCHANT, merchantKeyTarget.id);
-  const analystKey = await reissueApiKey(prisma, apiKeys, SEED_ANALYST_KEY_LABEL, ApiRole.ANALYST);
+  const fixedMerchantKey = readFixedKeyEnv(DEMO_MERCHANT_API_KEY_ENV);
+  const fixedAnalystKey = readFixedKeyEnv(DEMO_ANALYST_API_KEY_ENV);
+  if (fixedMerchantKey && fixedAnalystKey && fixedMerchantKey === fixedAnalystKey) {
+    throw new Error(`${DEMO_MERCHANT_API_KEY_ENV} et ${DEMO_ANALYST_API_KEY_ENV} doivent avoir des valeurs différentes`);
+  }
+
+  console.log(
+    `--- Clés API de démo (${fixedMerchantKey || fixedAnalystKey ? "fixes si DEMO_*_API_KEY défini, sinon " : ""}révoquées puis réémises) ---`,
+  );
+  const merchantKey = await resolveApiKey(
+    prisma,
+    apiKeys,
+    SEED_MERCHANT_KEY_LABEL,
+    ApiRole.MERCHANT,
+    DEMO_MERCHANT_API_KEY_ENV,
+    merchantKeyTarget.id,
+  );
+  const analystKey = await resolveApiKey(prisma, apiKeys, SEED_ANALYST_KEY_LABEL, ApiRole.ANALYST, DEMO_ANALYST_API_KEY_ENV);
 
   console.log("");
   console.log("Clés en clair — à coller dans le README de démo, non récupérables ensuite :");

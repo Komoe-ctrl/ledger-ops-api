@@ -1,5 +1,8 @@
 import { plainToInstance } from "class-transformer";
-import { IsIn, IsInt, IsOptional, IsString, IsUrl, Max, Min, validateSync } from "class-validator";
+import { IsIn, IsInt, IsOptional, IsString, IsUrl, Matches, Max, Min, validateSync } from "class-validator";
+
+/** base64url, 43 caractères minimum — même forme que generateApiKey() (32 octets d'aléa, sans padding). */
+const API_KEY_FORMAT = /^[A-Za-z0-9_-]{43,}$/;
 
 /**
  * Contrat des variables d'environnement attendues par l'API.
@@ -117,6 +120,22 @@ class EnvironmentVariables {
   @IsOptional()
   @IsString()
   CORS_ALLOWED_ORIGINS?: string;
+
+  /**
+   * Valeur fixe optionnelle pour les clés API de démo (scripts/seed-demo.ts)
+   * — des clés stables d'une remise à zéro nocturne à l'autre, pour que le
+   * README et le front n'aient pas une clé invalide chaque matin. Non
+   * défini = comportement précédent (clé aléatoire, révoquée puis réémise
+   * à chaque exécution).
+   */
+  @IsOptional()
+  @Matches(API_KEY_FORMAT, { message: "DEMO_MERCHANT_API_KEY doit être au format base64url, 43 caractères minimum" })
+  DEMO_MERCHANT_API_KEY?: string;
+
+  /** Voir DEMO_MERCHANT_API_KEY — doit être différente de celle-ci (vérifié par le seed, pas ici : dépend d'un autre champ). */
+  @IsOptional()
+  @Matches(API_KEY_FORMAT, { message: "DEMO_ANALYST_API_KEY doit être au format base64url, 43 caractères minimum" })
+  DEMO_ANALYST_API_KEY?: string;
 }
 
 /**

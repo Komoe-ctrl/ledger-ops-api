@@ -14,7 +14,12 @@ export type CreatedApiKey = {
 export class ApiKeysService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async create(dto: CreateApiKeyDto): Promise<CreatedApiKey> {
+  /**
+   * `options.rawKey` : uniquement pour un appelant interne (scripts/seed-demo.ts)
+   * qui a besoin d'une valeur stable d'une exécution à l'autre — jamais
+   * exposé via CreateApiKeyDto, jamais transmis par ApiKeysController.
+   */
+  async create(dto: CreateApiKeyDto, options?: { rawKey?: string }): Promise<CreatedApiKey> {
     const isMerchantRole = dto.role === ApiRole.MERCHANT;
     if (isMerchantRole && !dto.merchantId) {
       throw new BadRequestException("merchantId est obligatoire pour le rôle MERCHANT");
@@ -23,7 +28,7 @@ export class ApiKeysService {
       throw new BadRequestException(`merchantId n'a pas de sens pour le rôle ${dto.role}`);
     }
 
-    const rawKey = generateApiKey();
+    const rawKey = options?.rawKey ?? generateApiKey();
     const apiKey = await this.prisma.client.apiKey.create({
       data: {
         label: dto.label,

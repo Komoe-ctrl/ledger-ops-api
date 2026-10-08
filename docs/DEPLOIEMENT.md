@@ -64,6 +64,13 @@ Même repo/image que `api`, déployé comme un service Railway séparé dans le 
 **Variables** :
 - `DATABASE_URL` : rôle propriétaire.
 - `APP_DATABASE_URL` : identique à celle du service `api`.
+- `DEMO_MERCHANT_API_KEY` / `DEMO_ANALYST_API_KEY` : valeurs fixes des clés de démo
+  (format base64url, 43 caractères minimum — générer avec
+  `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`,
+  deux valeurs différentes). Sans elles, `npm run seed:demo` régénère une clé
+  aléatoire à chaque remise à zéro nocturne et le README/le front se retrouvent
+  avec une clé invalide le lendemain — avec elles, les mêmes clés survivent à
+  chaque reset (voir `scripts/seed-demo.ts`, `resolveFixedApiKey`).
 
 **Pas de domaine public.**
 
