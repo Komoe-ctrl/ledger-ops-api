@@ -1,5 +1,5 @@
 import { Body, Controller, HttpCode, Inject, Post, UseGuards } from "@nestjs/common";
-import { ApiCreatedResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiCreatedResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { CreateMerchantDto } from "./dto/create-merchant.dto";
 import { MerchantResponseDto } from "./dto/merchant-response.dto";
 import { MerchantsService } from "./merchants.service";
@@ -9,6 +9,7 @@ import { Roles } from "../auth/roles.decorator";
 import { ApiRole } from "../database/prisma";
 
 @ApiTags("merchants")
+@ApiBearerAuth()
 @Controller("v1/merchants")
 @UseGuards(ApiKeyGuard, RolesGuard)
 @Roles(ApiRole.ADMIN)

@@ -1,5 +1,5 @@
 import { Body, Controller, HttpCode, Inject, Param, Post, UseGuards } from "@nestjs/common";
-import { ApiCreatedResponse, ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiCreatedResponse, ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
 import { CreateApiKeyDto } from "./dto/create-api-key.dto";
 import { CreatedApiKeyResponseDto } from "./dto/created-api-key-response.dto";
 import { ApiKeysService } from "./api-keys.service";
@@ -9,6 +9,7 @@ import { Roles } from "./roles.decorator";
 import { ApiRole } from "../database/prisma";
 
 @ApiTags("api-keys")
+@ApiBearerAuth()
 @Controller("v1/api-keys")
 @UseGuards(ApiKeyGuard, RolesGuard)
 @Roles(ApiRole.ADMIN)
