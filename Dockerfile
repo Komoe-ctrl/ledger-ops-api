@@ -51,6 +51,10 @@ COPY --from=build /app/prisma.config.ts ./prisma.config.ts
 COPY --from=build /app/src ./src
 COPY --from=build /app/tsconfig.json ./tsconfig.json
 
+# `npm run demo:reset` (service api-maintenance) appelle psql directement
+# (scripts/reset-demo-data.sql) — absent de node:22-alpine par défaut.
+RUN apk add --no-cache postgresql-client
+
 # L'image officielle node:*-alpine fournit déjà un utilisateur non-root "node"
 # (uid 1000) — pas besoin d'en créer un.
 USER node
