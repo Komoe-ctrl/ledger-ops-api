@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Inject, Param, Patch, Query, UseGuards } from "@nestjs/common";
-import { ApiOkResponse, ApiOperation, ApiParam, ApiQuery, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiParam, ApiQuery, ApiTags } from "@nestjs/swagger";
 import { ResolveReconciliationExceptionDto } from "./dto/resolve-reconciliation-exception.dto";
 import { ReconciliationExceptionResponseDto } from "./dto/reconciliation-exception-response.dto";
 import { ReconciliationService } from "./reconciliation.service";
@@ -17,6 +17,7 @@ import { ApiRole } from "../database/prisma";
  * une transition EXPIRED -> SUCCEEDED (toujours fermée).
  */
 @ApiTags("reconciliation")
+@ApiBearerAuth()
 @Controller("v1/reconciliation-exceptions")
 @UseGuards(ApiKeyGuard, RolesGuard)
 @Roles(ApiRole.ANALYST, ApiRole.ADMIN)

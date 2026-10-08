@@ -13,6 +13,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import {
+  ApiBearerAuth,
   ApiHeader,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -61,6 +62,7 @@ function parseIfMatch(ifMatch: string | undefined): number {
 }
 
 @ApiTags("transactions")
+@ApiBearerAuth()
 @Controller("v1/transactions")
 @UseGuards(ApiKeyGuard, RolesGuard)
 export class TransactionsController {

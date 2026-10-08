@@ -1,5 +1,6 @@
 import { Body, Controller, Headers, HttpCode, Inject, Param, Post, Res, UseGuards } from "@nestjs/common";
 import {
+  ApiBearerAuth,
   ApiCreatedResponse,
   ApiHeader,
   ApiOkResponse,
@@ -26,6 +27,7 @@ import { ApiRole } from "../database/prisma";
 const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
 
 @ApiTags("payments")
+@ApiBearerAuth()
 @Controller("v1/payments")
 @UseGuards(ApiKeyGuard, RolesGuard)
 @Roles(ApiRole.MERCHANT)
