@@ -383,6 +383,56 @@ async function withShortExpiry<T>(minutes: string, fn: () => Promise<T>): Promis
   }
 }
 
+const EXPIRY_SETTLE_TIMEOUT_MS = 30_000;
+const EXPIRY_SETTLE_POLL_MS = 500;
+
+/**
+ * Attend que les transactions du lot « expirées » soient réellement EXPIRED, quel que soit
+ * le balayage qui les a expirées.
+ *
+ * Pourquoi pas un simple `expireOverduePending()` suivi d'une relecture : le balayage utilise
+ * `FOR UPDATE SKIP LOCKED`. Si le cron d'une AUTRE instance (le service public de l'API balaie
+ * chaque minute, sur la même base que ce seed nocturne) tient ces lignes à cet instant, notre
+ * balayage les saute (compte 0) et notre relecture voit encore PENDING : l'autre balayage n'a pas
+ * commité. Le seed échouait alors plus loin (« Aucune transaction EXPIRED disponible »), alors
+ * que ces transactions allaient être EXPIRED quelques millisecondes plus tard. Reproduit en
+ * tenant les verrous 8 s pendant le balayage du seed.
+ *
+ * Ici : on relance le balayage et on relit jusqu'à ce que tout le lot soit EXPIRED, qu'on les ait
+ * expirées nous-mêmes ou qu'un autre balayage l'ait fait. Au-delà du délai, on échoue en disant
+ * lesquelles sont restées PENDING (jamais un échec muet, ni un lot silencieusement incomplet).
+ */
+async function settleExpiredBatch(transactions: TransactionsService, references: string[]): Promise<void> {
+  const deadline = Date.now() + EXPIRY_SETTLE_TIMEOUT_MS;
+  let sweptHere = 0;
+  for (;;) {
+    sweptHere += await transactions.expireOverduePending();
+
+    const statuses = await Promise.all(
+      references.map(async (reference) => [reference, (await transactions.findByReferenceOrThrow(reference)).status] as const),
+    );
+    const unexpected = statuses.filter(([, s]) => s !== TransactionStatus.EXPIRED && s !== TransactionStatus.PENDING);
+    if (unexpected.length > 0) {
+      throw new Error(`Statut inattendu après balayage d'expiration : ${unexpected.map(([r, s]) => `${r}=${s}`).join(", ")}`);
+    }
+    const stillPending = statuses.filter(([, s]) => s === TransactionStatus.PENDING).map(([r]) => r);
+    if (stillPending.length === 0) {
+      const byOthers = Math.max(0, references.length - sweptHere);
+      console.log(
+        `  balayage d'expiration : ${references.length} transaction(s) EXPIRED (${sweptHere} expirée(s) par ce script, ${byOthers} déjà expirée(s) : rejeu ou autre balayage)`,
+      );
+      return;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Balayage d'expiration : ${stillPending.length} transaction(s) encore PENDING après ${EXPIRY_SETTLE_TIMEOUT_MS / 1000} s ` +
+          `(${stillPending.join(", ")}) — un autre processus tient-il ces lignes ?`,
+      );
+    }
+    await sleep(EXPIRY_SETTLE_POLL_MS);
+  }
+}
+
 async function seedTransactions(
   payments: PaymentsService,
   transactions: TransactionsService,
@@ -414,8 +464,10 @@ async function seedTransactions(
       expiredResults.push(await seedOnePayment(payments, transactions, merchant, scenario));
     }
     await sleep(3000);
-    const expiredCount = await transactions.expireOverduePending();
-    console.log(`  balayage d'expiration : ${expiredCount} transaction(s) passée(s) EXPIRED`);
+    await settleExpiredBatch(
+      transactions,
+      expiredResults.map((r) => r.reference),
+    );
   });
   // Statut relu APRÈS le balayage : au moment de leur création, ces
   // transactions étaient encore PENDING — la mise à jour EXPIRED n'a lieu
