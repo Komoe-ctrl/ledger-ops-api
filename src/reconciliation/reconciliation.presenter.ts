@@ -7,6 +7,7 @@ type ReconciliationExceptionWithTransaction = Prisma.ReconciliationExceptionGetP
 
 export function toReconciliationExceptionResponse(
   exception: ReconciliationExceptionWithTransaction,
+  resolverLabels: ReadonlyMap<string, string> = new Map(),
 ): ReconciliationExceptionResponseDto {
   return {
     id: exception.id,
@@ -18,6 +19,7 @@ export function toReconciliationExceptionResponse(
     detectedAt: exception.detectedAt,
     resolvedAt: exception.resolvedAt,
     resolvedBy: exception.resolvedBy,
+    resolvedByLabel: exception.resolvedBy ? (resolverLabels.get(exception.resolvedBy) ?? null) : null,
     resolution: exception.resolution,
   };
 }
