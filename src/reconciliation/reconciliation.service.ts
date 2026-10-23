@@ -3,6 +3,8 @@ import { PrismaService } from "../database/prisma.service";
 import { ReconciliationExceptionKind } from "../database/prisma";
 import { ResolveReconciliationExceptionDto } from "./dto/resolve-reconciliation-exception.dto";
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const INCLUDE_TRANSACTION_REFERENCE = { transaction: { select: { reference: true } } } as const;
 
 /** Tout sauf LATE_ACKNOWLEDGMENT, réservé au chemin automatique de TransactionsService.transition() (ADR 0007). */
@@ -26,6 +28,20 @@ export class ReconciliationService {
       include: INCLUDE_TRANSACTION_REFERENCE,
       orderBy: { detectedAt: "desc" },
     });
+  }
+
+  /**
+   * `resolvedBy` porte l'identifiant de la clé API qui a résolu (UUID) : illisible
+   * pour un humain. On renvoie en plus le libellé de la clé, quand elle existe
+   * (resolvedBy est un texte libre en base, pas une clé étrangère).
+   */
+  async resolverLabels(exceptions: { resolvedBy: string | null }[]): Promise<Map<string, string>> {
+    const ids = [...new Set(exceptions.map((e) => e.resolvedBy).filter((v): v is string => !!v && UUID_PATTERN.test(v)))];
+    if (ids.length === 0) {
+      return new Map();
+    }
+    const keys = await this.prisma.client.apiKey.findMany({ where: { id: { in: ids } }, select: { id: true, label: true } });
+    return new Map(keys.map((k) => [k.id, k.label]));
   }
 
   async findByIdOrThrow(id: string) {

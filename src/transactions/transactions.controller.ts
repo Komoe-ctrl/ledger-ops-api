@@ -26,6 +26,8 @@ import type { Response } from "express";
 import { ListTransactionsQueryDto } from "./dto/list-transactions.query.dto";
 import { TransitionStatusDto } from "./dto/transition-status.dto";
 import { TransactionsService } from "./transactions.service";
+import { TransactionAuditService } from "./transaction-audit.service";
+import { TransactionAuditResponseDto } from "./dto/transaction-audit-response.dto";
 import { toHistoryResponse, toTransactionResponse } from "./transaction.presenter";
 import { TransactionResponseDto } from "./dto/transaction-response.dto";
 import { TransactionListResponseDto } from "./dto/transaction-list-response.dto";
@@ -66,7 +68,10 @@ function parseIfMatch(ifMatch: string | undefined): number {
 @Controller("v1/transactions")
 @UseGuards(ApiKeyGuard, RolesGuard)
 export class TransactionsController {
-  constructor(@Inject(TransactionsService) private readonly transactions: TransactionsService) {}
+  constructor(
+    @Inject(TransactionsService) private readonly transactions: TransactionsService,
+    @Inject(TransactionAuditService) private readonly audit: TransactionAuditService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: "Lister les transactions (filtres + pagination par curseur)" })
@@ -112,6 +117,25 @@ export class TransactionsController {
     assertOwnership(auth, transaction);
     const history = await this.transactions.history(reference);
     return history.map(toHistoryResponse);
+  }
+
+  @Get(":reference/audit")
+  @ApiOperation({
+    summary: "Audit d'une transaction : chronologie des statuts, remboursements et écritures comptables",
+    description:
+      "Chronologie fusionnée de la transaction et de ses remboursements (litige compris), puis écritures comptables avec totaux et équilibre calculés en SQL. " +
+      "Les écritures ne sont pas exposées à un MERCHANT (entries = null).",
+  })
+  @ApiParam({ name: "reference", example: "TXN-20260922-8F3K2Q" })
+  @ApiOkResponse({ type: TransactionAuditResponseDto })
+  @ApiNotFoundResponse({ type: ProblemDetailsDto })
+  async getAudit(
+    @Param("reference") reference: string,
+    @CurrentAuth() auth: AuthContext,
+  ): Promise<TransactionAuditResponseDto> {
+    const transaction = await this.transactions.findByReferenceOrThrow(reference);
+    assertOwnership(auth, transaction);
+    return this.audit.build(transaction, auth.role !== ApiRole.MERCHANT);
   }
 
   @Patch(":reference/status")

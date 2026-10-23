@@ -30,7 +30,8 @@ export class ReconciliationController {
   @ApiOkResponse({ type: [ReconciliationExceptionResponseDto] })
   async list(@Query("onlyUnresolved") onlyUnresolved?: string): Promise<ReconciliationExceptionResponseDto[]> {
     const exceptions = await this.reconciliation.list(onlyUnresolved === "true");
-    return exceptions.map(toReconciliationExceptionResponse);
+    const labels = await this.reconciliation.resolverLabels(exceptions);
+    return exceptions.map((e) => toReconciliationExceptionResponse(e, labels));
   }
 
   @Get(":id")
@@ -38,7 +39,7 @@ export class ReconciliationController {
   @ApiOkResponse({ type: ReconciliationExceptionResponseDto })
   async getOne(@Param("id") id: string): Promise<ReconciliationExceptionResponseDto> {
     const exception = await this.reconciliation.findByIdOrThrow(id);
-    return toReconciliationExceptionResponse(exception);
+    return toReconciliationExceptionResponse(exception, await this.reconciliation.resolverLabels([exception]));
   }
 
   @Patch(":id/resolve")
@@ -54,6 +55,6 @@ export class ReconciliationController {
     @CurrentAuth() auth: AuthContext,
   ): Promise<ReconciliationExceptionResponseDto> {
     const exception = await this.reconciliation.resolve(id, dto, auth.apiKeyId);
-    return toReconciliationExceptionResponse(exception);
+    return toReconciliationExceptionResponse(exception, await this.reconciliation.resolverLabels([exception]));
   }
 }

@@ -32,6 +32,13 @@ export class ReconciliationExceptionResponseDto {
   @ApiProperty({ nullable: true })
   resolvedBy!: string | null;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: "Libellé de la clé API qui a résolu l'exception (resolvedBy est son identifiant). null si non résolue ou clé introuvable.",
+  })
+  resolvedByLabel!: string | null;
+
   @ApiProperty({ nullable: true })
   resolution!: string | null;
 }

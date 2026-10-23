@@ -102,6 +102,8 @@ describe("Acquittement tardif / rapprochement (e2e)", () => {
     // resolvedBy est désormais dérivé de la clé API authentifiée, jamais du corps de requête.
     expect(typeof resolved.body.resolvedBy).toBe("string");
     expect(resolved.body.resolvedBy.length).toBeGreaterThan(0);
+    // Libellé de la clé, lisible par un humain (resolvedBy n'est que son identifiant).
+    expect(resolved.body.resolvedByLabel).toBe("e2e analyst");
 
     // Une deuxième résolution est refusée — jamais réécrite.
     await request(server)
