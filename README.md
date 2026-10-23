@@ -37,7 +37,7 @@ npm run start:dev                # démarre l'API (http://localhost:3000, /docs 
 ```bash
 npm run seed:demo
 ```
-Remplit la base avec une activité crédible : 3 marchands, ~70 paiements répartis sur les 4 opérateurs (majorité `SUCCEEDED`, quelques `FAILED`/`EXPIRED`, 2-3 `PENDING` en cours), 2 remboursements, 1 litige perdu, et les 4 types d'exceptions de rapprochement (ADR 0007/0008). À la fin, le script affiche les clés API de démo en clair (une seule fois, jamais récupérables ensuite) et vérifie lui-même que le grand livre reste équilibré.
+Remplit la base avec une activité crédible : 3 marchands, ~70 paiements répartis sur les 4 opérateurs (majorité `SUCCEEDED`, quelques `FAILED`/`EXPIRED`, 2-3 `PENDING` en cours), 2 remboursements, 1 litige perdu, et les 4 types d'exceptions de rapprochement (ADR 0007/0008), dont une déjà résolue (par la clé ANALYST de démo) pour que l'écran de rapprochement ne soit pas vide. À la fin, le script affiche les clés API de démo en clair (une seule fois, jamais récupérables ensuite) et vérifie lui-même que le grand livre reste équilibré.
 
 - **Sûr à ré-exécuter sans reset** : chaque transaction a une clé d'idempotence déterministe, les clés API de démo sont révoquées puis réémises à chaque run (jamais accumulées).
 - **Aucun raccourci** : passe exclusivement par les services applicatifs (`PaymentsService`, `TransactionsService`, `ReconciliationService`...), jamais par un INSERT direct — les données produites suivent les mêmes règles qu'un vrai paiement.

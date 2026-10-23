@@ -175,7 +175,7 @@ async function seedMerchantsAndKeys(
   prisma: PrismaService,
   merchants: MerchantsService,
   apiKeys: ApiKeysService,
-): Promise<Map<string, Merchant>> {
+): Promise<{ merchants: Map<string, Merchant>; analystKeyId: string }> {
   console.log("--- Marchands ---");
   const createdMerchants = new Map<string, Merchant>();
   for (const dto of DEMO_MERCHANTS) {
@@ -213,7 +213,7 @@ async function seedMerchantsAndKeys(
   console.log(`  MERCHANT (${MERCHANT_KEY_MERCHANT_CODE}) : ${merchantKey.rawKey}`);
   console.log(`  ANALYST                    : ${analystKey.rawKey}`);
 
-  return createdMerchants;
+  return { merchants: createdMerchants, analystKeyId: analystKey.apiKey.id };
 }
 
 // ---------------------------------------------------------------------------
@@ -579,6 +579,7 @@ async function seedReconciliationExceptions(
   transactions: TransactionsService,
   reconciliation: ReconciliationService,
   seeded: SeededTransaction[],
+  analystKeyId: string,
 ): Promise<void> {
   console.log("--- Exceptions de rapprochement ---");
 
@@ -635,6 +636,25 @@ async function seedReconciliationExceptions(
     }),
   );
   console.log(`  absente du relevé : ${missingInStatementTarget.reference}`);
+
+  // Une exception déjà résolue, pour que l'écran Rapprochement ne montre pas un onglet
+  // « Résolues » vide en démo. Résolue par la clé ANALYST de démo, par le même chemin que
+  // PATCH /v1/reconciliation-exceptions/:id/resolve. Rejouable : on ne résout qu'une fois.
+  const toResolve = await prisma.client.reconciliationException.findFirstOrThrow({
+    where: { kind: ReconciliationExceptionKind.MISSING_IN_STATEMENT, transactionId: missingInStatementTx.id },
+  });
+  if (!toResolve.resolvedAt) {
+    await reconciliation.resolve(
+      toResolve.id,
+      {
+        resolution:
+          "Relevé complémentaire reçu d'Orange Money : la transaction y figure avec un jour de décalage de valeur, " +
+          "montant identique. Pointage manuel effectué, aucune écriture corrective nécessaire.",
+      },
+      analystKeyId,
+    );
+  }
+  console.log(`  résolue d'avance : ${missingInStatementTarget.reference}`);
 
   await reportDiscrepancyIfMissing(
     prisma,
@@ -742,10 +762,10 @@ async function main(): Promise<void> {
   // premières transactions de la fenêtre de rapprochement (ADR 0009).
   const [{ now: startedAt }] = await prisma.client.$queryRaw<{ now: Date }[]>`SELECT now() AS now`;
 
-  const merchants = await seedMerchantsAndKeys(prisma, merchantsService, apiKeys);
+  const { merchants, analystKeyId } = await seedMerchantsAndKeys(prisma, merchantsService, apiKeys);
   const seeded = await seedTransactions(payments, transactions, merchants);
   await seedRefundsAndDispute(payments, transactions, seeded);
-  await seedReconciliationExceptions(prisma, transactions, reconciliation, seeded);
+  await seedReconciliationExceptions(prisma, transactions, reconciliation, seeded, analystKeyId);
   await verifyAndSummarize(prisma, startedAt);
 
   await app.close();
