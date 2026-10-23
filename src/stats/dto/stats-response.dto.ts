@@ -20,6 +20,24 @@ export class PaymentStatsDto {
   byStatus!: StatusCountDto[];
 }
 
+export class ReconciliationStatsDto {
+  @ApiProperty({ type: String, format: "date-time", description: "Début de la fenêtre : premier chargement du jeu (ADR 0009)." })
+  windowStart!: string;
+
+  @ApiProperty({ type: String, format: "date-time", description: "Fin de la fenêtre : dernier chargement enregistré." })
+  windowEnd!: string;
+
+  @ApiProperty({ type: Number, example: 66, description: "Transactions dénouées (statut ni INITIATED ni PENDING) créées dans la fenêtre." })
+  settledTransactions!: number;
+
+  @ApiProperty({
+    type: Number,
+    example: 63,
+    description: "Parmi les dénouées : celles sans exception de rapprochement ouverte. Taux = reconciledTransactions / settledTransactions.",
+  })
+  reconciledTransactions!: number;
+}
+
 export class StatsResponseDto {
   @ApiProperty({
     enum: ["GLOBAL", "MERCHANT"],
@@ -46,6 +64,14 @@ export class StatsResponseDto {
       "Exceptions de rapprochement non résolues. null pour un MERCHANT : le rapprochement est réservé aux rôles ANALYST/OPERATOR/ADMIN.",
   })
   openReconciliationExceptions!: number | null;
+
+  @ApiProperty({
+    type: ReconciliationStatsDto,
+    nullable: true,
+    description:
+      "Base du taux de rapprochement (ADR 0009). null pour un MERCHANT, ou tant qu'aucun chargement du jeu n'a enregistré de fenêtre : on n'invente pas de taux.",
+  })
+  reconciliation!: ReconciliationStatsDto | null;
 
   @ApiProperty({
     type: String,

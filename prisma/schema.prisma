@@ -312,6 +312,8 @@ model ReconciliationException {
 /// plus récente (`demoDatasetLoadedAt`) — un fait enregistré, jamais déduit.
 model DemoDatasetLoad {
   id       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Début du chargement, horloge de la base. Null pour les lignes antérieures à la colonne.
+  startedAt DateTime? @map("started_at") @db.Timestamptz(3)
   loadedAt DateTime @default(now()) @map("loaded_at") @db.Timestamptz(3)
 
   @@map("demo_dataset_loads")

@@ -1,9 +1,12 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { PrismaService } from "../database/prisma.service";
 import { TransactionStatus, TransactionType } from "../database/prisma";
-import { PaymentStatsDto, StatsResponseDto, StatusCountDto } from "./dto/stats-response.dto";
+import { PaymentStatsDto, ReconciliationStatsDto, StatsResponseDto, StatusCountDto } from "./dto/stats-response.dto";
 
 const ALL_STATUSES = Object.values(TransactionStatus);
+
+/** Pas encore dénoué : l'opérateur n'a pas rendu de verdict, il n'y a rien à rapprocher (ADR 0009). */
+const IN_PROGRESS_STATUSES = [TransactionStatus.INITIATED, TransactionStatus.PENDING];
 
 /** Tous les statuts, y compris à 0 : le front n'a ainsi jamais à deviner qu'une clé absente vaut zéro. */
 function toStatusCounts(counts: Map<TransactionStatus, number>): StatusCountDto[] {
@@ -31,7 +34,7 @@ export class StatsService {
         _count: { _all: true },
       }),
       merchantId ? Promise.resolve(null) : this.prisma.client.reconciliationException.count({ where: { resolvedAt: null } }),
-      this.prisma.client.demoDatasetLoad.aggregate({ _max: { loadedAt: true } }),
+      this.prisma.client.demoDatasetLoad.aggregate({ _max: { loadedAt: true }, _min: { startedAt: true } }),
     ]);
 
     const all = new Map<TransactionStatus, number>();
@@ -48,6 +51,10 @@ export class StatsService {
       }
     }
 
+    const windowStart = lastLoad._min.startedAt;
+    const windowEnd = lastLoad._max.loadedAt;
+    const reconciliation = merchantId || !windowStart || !windowEnd ? null : await this.reconciliation(windowStart, windowEnd);
+
     const paymentStats: PaymentStatsDto = { total: totalPayments, byStatus: toStatusCounts(payments) };
     return {
       scope: merchantId ? "MERCHANT" : "GLOBAL",
@@ -55,7 +62,31 @@ export class StatsService {
       byStatus: toStatusCounts(all),
       payments: paymentStats,
       openReconciliationExceptions: openExceptions,
-      demoDatasetLoadedAt: lastLoad._max.loadedAt?.toISOString() ?? null,
+      reconciliation,
+      demoDatasetLoadedAt: windowEnd?.toISOString() ?? null,
+    };
+  }
+
+  /**
+   * Formule et limites : ADR 0009. Deux COUNT en base sur la même fenêtre ; la
+   * seule opération ici est la soustraction de deux entiers déjà comptés.
+   */
+  private async reconciliation(windowStart: Date, windowEnd: Date): Promise<ReconciliationStatsDto> {
+    const inWindowAndSettled = {
+      createdAt: { gte: windowStart, lte: windowEnd },
+      status: { notIn: IN_PROGRESS_STATUSES },
+    };
+    const [settled, withOpenException] = await Promise.all([
+      this.prisma.client.transaction.count({ where: inWindowAndSettled }),
+      this.prisma.client.transaction.count({
+        where: { ...inWindowAndSettled, reconciliationExceptions: { some: { resolvedAt: null } } },
+      }),
+    ]);
+    return {
+      windowStart: windowStart.toISOString(),
+      windowEnd: windowEnd.toISOString(),
+      settledTransactions: settled,
+      reconciledTransactions: settled - withOpenException,
     };
   }
 }
