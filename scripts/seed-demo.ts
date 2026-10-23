@@ -678,7 +678,7 @@ async function seedReconciliationExceptions(
  * fichier) : le résumé final l'assume explicitement — "jeu de démonstration
  * chargé le <horodatage>", jamais une fausse "activité du jour".
  */
-async function verifyAndSummarize(prisma: PrismaService): Promise<void> {
+async function verifyAndSummarize(prisma: PrismaService, startedAt: Date): Promise<void> {
   console.log("--- Vérification finale ---");
 
   const violations = await prisma.client.$queryRaw<
@@ -718,7 +718,7 @@ async function verifyAndSummarize(prisma: PrismaService): Promise<void> {
   console.log("");
   // Enregistré en base (registre en ajout seul) : GET /v1/stats expose ce fait,
   // le front n'a plus à le deviner à partir des transactions.
-  const load = await prisma.client.demoDatasetLoad.create({ data: {} });
+  const load = await prisma.client.demoDatasetLoad.create({ data: { startedAt } });
   console.log(`Jeu de démonstration chargé le ${load.loadedAt.toISOString()}.`);
 }
 
@@ -737,11 +737,16 @@ async function main(): Promise<void> {
   const transactions = app.get(TransactionsService);
   const reconciliation = app.get(ReconciliationService);
 
+  // Début de fenêtre lu sur l'horloge de la BASE (celle de created_at des transactions),
+  // pas sur celle de ce processus : un décalage de quelques secondes exclurait les
+  // premières transactions de la fenêtre de rapprochement (ADR 0009).
+  const [{ now: startedAt }] = await prisma.client.$queryRaw<{ now: Date }[]>`SELECT now() AS now`;
+
   const merchants = await seedMerchantsAndKeys(prisma, merchantsService, apiKeys);
   const seeded = await seedTransactions(payments, transactions, merchants);
   await seedRefundsAndDispute(payments, transactions, seeded);
   await seedReconciliationExceptions(prisma, transactions, reconciliation, seeded);
-  await verifyAndSummarize(prisma);
+  await verifyAndSummarize(prisma, startedAt);
 
   await app.close();
 }

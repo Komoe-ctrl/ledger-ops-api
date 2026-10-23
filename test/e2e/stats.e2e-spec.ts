@@ -16,6 +16,12 @@ type Stats = {
   payments: { total: number; byStatus: StatusCount[] };
   openReconciliationExceptions: number | null;
   demoDatasetLoadedAt: string | null;
+  reconciliation: {
+    windowStart: string;
+    windowEnd: string;
+    settledTransactions: number;
+    reconciledTransactions: number;
+  } | null;
 };
 
 const ALL_STATUSES = [
@@ -97,6 +103,8 @@ describe("GET /v1/stats (e2e)", () => {
 
     const stats = await getStats(keys.analyst);
     expect(stats.demoDatasetLoadedAt).toBe(latest.loadedAt.toISOString());
+    // Chargements sans début connu : pas de fenêtre, donc pas de taux inventé.
+    expect(stats.reconciliation).toBeNull();
   });
 
   describe("portée MERCHANT", () => {
@@ -203,6 +211,84 @@ describe("GET /v1/stats (e2e)", () => {
 
       const resolved = await getStats(keys.analyst);
       expect(resolved.openReconciliationExceptions).toBe(before.openReconciliationExceptions);
+    });
+  });
+
+  // Dernier bloc du fichier : il inscrit un chargement AVEC début de fenêtre, ce qui
+  // fixe la fenêtre pour tout ce qui s'exécute après lui (ADR 0009).
+  describe("taux de rapprochement (fenêtre du jeu de démonstration)", () => {
+    const dbNow = async (): Promise<Date> => {
+      const [{ now }] = await app.get(PrismaService).client.$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS now`;
+      return now;
+    };
+    const pause = () => new Promise((resolve) => setTimeout(resolve, 25));
+    let openExceptionId = "";
+
+    it("compte les transactions dénouées de la fenêtre, moins celles ayant une exception ouverte", async () => {
+      const prisma = app.get(PrismaService);
+      const reconciliation = app.get(ReconciliationService);
+
+      // Hors fenêtre : dénouée avant le début du chargement, ne doit pas être comptée.
+      const before = await createPayment(keys.merchant);
+      await succeed(before.reference);
+      await pause();
+      const windowStart = await dbNow();
+      await pause();
+
+      const clean = await createPayment(keys.merchant);
+      await succeed(clean.reference);
+      const withOpen = await createPayment(keys.merchant);
+      await succeed(withOpen.reference);
+      const withResolved = await createPayment(keys.merchant);
+      await succeed(withResolved.reference);
+      await createPayment(keys.merchant); // INITIATED : pas dénouée, hors dénominateur
+
+      const idOf = async (reference: string) =>
+        (await prisma.client.transaction.findUniqueOrThrow({ where: { reference }, select: { id: true } })).id;
+      const open = await reconciliation.reportDiscrepancy({
+        kind: "AMOUNT_MISMATCH",
+        transactionId: await idOf(withOpen.reference),
+        detail: "Écart de montant (test taux de rapprochement) — reste ouvert",
+      });
+      openExceptionId = open.id;
+      const resolvedException = await reconciliation.reportDiscrepancy({
+        kind: "AMOUNT_MISMATCH",
+        transactionId: await idOf(withResolved.reference),
+        detail: "Écart de montant (test taux de rapprochement) — sera résolu",
+      });
+      await request(server)
+        .patch(`/v1/reconciliation-exceptions/${resolvedException.id}/resolve`)
+        .set(...authHeader(keys.analyst))
+        .send({ resolution: "Vérifié auprès de l'opérateur" })
+        .expect(200);
+
+      await prisma.client.demoDatasetLoad.create({ data: { startedAt: windowStart } });
+
+      const stats = await getStats(keys.analyst);
+      expect(stats.reconciliation).not.toBeNull();
+      expect(stats.reconciliation!.settledTransactions).toBe(3);
+      expect(stats.reconciliation!.reconciledTransactions).toBe(2);
+      expect(stats.reconciliation!.windowStart).toBe(windowStart.toISOString());
+      expect(stats.reconciliation!.windowEnd).toBe(stats.demoDatasetLoadedAt);
+    });
+
+    it("compte de nouveau comme rapprochée une transaction dont l'exception vient d'être résolue", async () => {
+      const before = (await getStats(keys.admin)).reconciliation!;
+
+      await request(server)
+        .patch(`/v1/reconciliation-exceptions/${openExceptionId}/resolve`)
+        .set(...authHeader(keys.analyst))
+        .send({ resolution: "Résolu pour le test" })
+        .expect(200);
+
+      const after = (await getStats(keys.admin)).reconciliation!;
+      expect(after.settledTransactions).toBe(before.settledTransactions);
+      expect(after.reconciledTransactions).toBe(before.reconciledTransactions + 1);
+    });
+
+    it("n'expose pas ce taux à un marchand (null)", async () => {
+      const stats = await getStats(keys.merchant);
+      expect(stats.reconciliation).toBeNull();
     });
   });
 });
