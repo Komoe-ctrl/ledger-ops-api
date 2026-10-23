@@ -101,5 +101,11 @@ SELECT pg_temp.expect_error('TRUNCATE sur une table comptable',
 SELECT pg_temp.expect_error('créer une table (aucun DDL pour ce rôle)',
   $q$ CREATE TABLE public.probe_least_privilege (id int) $q$, '42501');
 
+SELECT pg_temp.expect_error('modifier un chargement de démo',
+  $q$ UPDATE demo_dataset_loads SET loaded_at = now() WHERE false $q$, '42501');
+
+SELECT pg_temp.expect_error('supprimer un chargement de démo',
+  $q$ DELETE FROM demo_dataset_loads WHERE false $q$, '42501');
+
 \echo ''
 \echo 'Tous les tests de privilèges (ledger_app) sont passés.'

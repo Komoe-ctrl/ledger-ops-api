@@ -11,6 +11,7 @@ import { PaymentsModule } from "./payments/payments.module";
 import { TransactionsModule } from "./transactions/transactions.module";
 import { ExpirationModule } from "./expiration/expiration.module";
 import { ReconciliationModule } from "./reconciliation/reconciliation.module";
+import { StatsModule } from "./stats/stats.module";
 import { ProviderSimulatorModule } from "./provider-simulator/provider-simulator.module";
 import { RateLimitModule } from "./rate-limit/rate-limit.module";
 
@@ -29,6 +30,7 @@ import { RateLimitModule } from "./rate-limit/rate-limit.module";
     PaymentsModule,
     TransactionsModule,
     ReconciliationModule,
+    StatsModule,
     // Activé par défaut (contrairement au simulateur) : c'est un
     // comportement de production normal, pas une dépendance optionnelle.
     // Désactivé explicitement par les tests e2e et les scripts one-shot

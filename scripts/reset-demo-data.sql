@@ -22,6 +22,7 @@
 
 BEGIN;
 
+ALTER TABLE "demo_dataset_loads"             DISABLE TRIGGER ALL;
 ALTER TABLE "reconciliation_exceptions"     DISABLE TRIGGER ALL;
 ALTER TABLE "ledger_postings"               DISABLE TRIGGER ALL;
 ALTER TABLE "journal_entries"               DISABLE TRIGGER ALL;
@@ -31,7 +32,7 @@ ALTER TABLE "api_keys"                      DISABLE TRIGGER ALL;
 ALTER TABLE "merchants"                     DISABLE TRIGGER ALL;
 ALTER TABLE "ledger_accounts"               DISABLE TRIGGER ALL;
 
--- CASCADE : sans effet aujourd'hui (les 8 tables listées couvrent déjà tout
+-- CASCADE : sans effet aujourd'hui (les 9 tables listées couvrent déjà tout
 -- le graphe de dépendances — aucune autre table ne référence l'une
 -- d'elles), gardé pour ne pas casser silencieusement si une migration
 -- future ajoute une table dépendante qu'on aurait oublié d'ajouter ici.
@@ -49,6 +50,7 @@ TRUNCATE TABLE
   "ledger_accounts"
 RESTART IDENTITY CASCADE;
 
+ALTER TABLE "demo_dataset_loads"             ENABLE TRIGGER ALL;
 ALTER TABLE "reconciliation_exceptions"     ENABLE TRIGGER ALL;
 ALTER TABLE "ledger_postings"               ENABLE TRIGGER ALL;
 ALTER TABLE "journal_entries"               ENABLE TRIGGER ALL;

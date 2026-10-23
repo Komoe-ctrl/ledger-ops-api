@@ -306,3 +306,13 @@ model ReconciliationException {
   @@index([resolvedAt])
   @@map("reconciliation_exceptions")
 }
+
+/// Registre en ajout seul des chargements du jeu de démonstration : une ligne
+/// par exécution réussie de scripts/seed-demo.ts. GET /v1/stats expose la
+/// plus récente (`demoDatasetLoadedAt`) — un fait enregistré, jamais déduit.
+model DemoDatasetLoad {
+  id       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loadedAt DateTime @default(now()) @map("loaded_at") @db.Timestamptz(3)
+
+  @@map("demo_dataset_loads")
+}
