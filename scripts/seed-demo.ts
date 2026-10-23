@@ -743,7 +743,27 @@ async function main(): Promise<void> {
   await app.close();
 }
 
+/**
+ * `process.exit(1)` explicite, pas `process.exitCode = 1` : ce dernier ne
+ * fait sortir le process en échec QUE si la boucle d'événements se termine
+ * naturellement ensuite — un handle laissé ouvert ailleurs (ex. un module
+ * Nest partiellement instancié avant l'échec) peut masquer l'échec derrière
+ * un exit 0 par défaut. Les deux gestionnaires ci-dessous couvrent aussi un
+ * rejet qui échapperait à la chaîne de promesses de main() elle-même — en
+ * particulier une erreur levée pendant NestFactory.createApplicationContext
+ * (validation d'environnement, ConfigModule.forRoot) peut survenir avant
+ * que main() n'ait la main sur son propre try/catch.
+ */
+process.on("unhandledRejection", (err) => {
+  console.error(err);
+  process.exit(1);
+});
+process.on("uncaughtException", (err) => {
+  console.error(err);
+  process.exit(1);
+});
+
 main().catch((err) => {
   console.error(err);
-  process.exitCode = 1;
+  process.exit(1);
 });

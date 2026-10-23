@@ -1,4 +1,4 @@
-import { plainToInstance } from "class-transformer";
+import { plainToInstance, Type } from "class-transformer";
 import { IsIn, IsInt, IsOptional, IsString, IsUrl, Matches, Max, Min, validateSync } from "class-validator";
 
 /** base64url, 43 caractères minimum — même forme que generateApiKey() (32 octets d'aléa, sans padding). */
@@ -40,8 +40,19 @@ class EnvironmentVariables {
    * Borne le pool `pg` sous-jacent (voir docs/DEPLOIEMENT.md) — une base
    * Postgres managée gratuite tolère peu de connexions simultanées. 5 par
    * défaut si absent (voir createPrismaClient).
+   *
+   * @Type(() => Number) explicite sur CHAQUE champ numérique ci-dessous :
+   * `enableImplicitConversion` (plus bas) devine le type cible depuis les
+   * métadonnées `design:type` émises par `emitDecoratorMetadata` — sous
+   * tsx/esbuild (scripts/*.ts, jamais compilés par tsc), cette émission est
+   * silencieusement absente. La chaîne "3000" restait alors une chaîne,
+   * rejetée par @IsInt() ("PORT must be an integer number") — constaté en
+   * production sur Railway, qui injecte PORT dans tous les services, y
+   * compris api-maintenance où seed-demo.ts tourne via tsx. @Type() fixe le
+   * type cible explicitement, sans dépendre d'aucune métadonnée réfléchie.
    */
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(100)
@@ -52,6 +63,7 @@ class EnvironmentVariables {
   REDIS_URL?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(65535)
@@ -62,30 +74,35 @@ class EnvironmentVariables {
    * voir docs/adr/0007-acquittement-tardif.md.
    */
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(1440)
   PAYMENT_EXPIRY_MINUTES_DEFAULT?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(1440)
   PAYMENT_EXPIRY_MINUTES_ORANGE_MONEY?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(1440)
   PAYMENT_EXPIRY_MINUTES_MTN_MOMO?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(1440)
   PAYMENT_EXPIRY_MINUTES_WAVE?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(1440)
@@ -102,6 +119,7 @@ class EnvironmentVariables {
 
   /** Probabilité (0-100) qu'un règlement simulé se conclue en FAILED plutôt que SUCCEEDED. */
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   @Max(100)
