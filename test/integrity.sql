@@ -299,5 +299,16 @@ SELECT pg_temp.expect_error('AMOUNT_MISMATCH avec un reported_status',
 INSERT INTO reconciliation_exceptions (kind, provider_reference, detail)
 VALUES ('MISSING_LOCALLY', 'OM-TEST-FANTOME', 'relevé sans transaction locale correspondante');
 
+-- ---------------------------------------------------------------------------
+-- Registre des chargements de la démo : ajout seul
+-- ---------------------------------------------------------------------------
+INSERT INTO demo_dataset_loads DEFAULT VALUES;
+
+SELECT pg_temp.expect_error('modifier un chargement de démo',
+  $q$ UPDATE demo_dataset_loads SET loaded_at = now() $q$, 'LX001');
+
+SELECT pg_temp.expect_error('supprimer un chargement de démo',
+  $q$ DELETE FROM demo_dataset_loads $q$, 'LX001');
+
 \echo ''
 \echo 'Tous les tests d''intégrité sont passés.'

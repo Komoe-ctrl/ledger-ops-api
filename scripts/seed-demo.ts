@@ -716,7 +716,10 @@ async function verifyAndSummarize(prisma: PrismaService): Promise<void> {
   );
 
   console.log("");
-  console.log(`Jeu de démonstration chargé le ${new Date().toISOString()}.`);
+  // Enregistré en base (registre en ajout seul) : GET /v1/stats expose ce fait,
+  // le front n'a plus à le deviner à partir des transactions.
+  const load = await prisma.client.demoDatasetLoad.create({ data: {} });
+  console.log(`Jeu de démonstration chargé le ${load.loadedAt.toISOString()}.`);
 }
 
 async function main(): Promise<void> {
